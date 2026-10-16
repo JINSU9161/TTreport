@@ -1,0 +1,15 @@
+{
+  "name": "ttreport-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serves TTreport index.html from a private GitHub repo via Cloudflare Workers",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.0"
+  }
+}
