@@ -264,7 +264,7 @@ tr:nth-child(even):hover td{background:var(--primary-light)}
     <div class="login-logo">
       <span class="logo-icon">📋</span>
       <h1>교육 출석부 &amp; 일지</h1>
-      <p>사용자명과 코드를 입력해 시작하세요</p>
+      <p>사용자명과 비밀번호를 입력해 시작하세요</p>
     </div>
     <div class="login-error" id="loginError"></div>
     <div class="login-field">
@@ -273,8 +273,8 @@ tr:nth-child(even):hover td{background:var(--primary-light)}
              onkeyup="if(event.key==='Enter') document.getElementById('loginCode').focus()">
     </div>
     <div class="login-field">
-      <label>코드 <span class="req">*</span></label>
-      <input type="password" id="loginCode" placeholder="코드" autocomplete="current-password"
+      <label>비밀번호 <span class="req">*</span></label>
+      <input type="password" id="loginCode" placeholder="비밀번호" autocomplete="current-password"
              onkeyup="if(event.key==='Enter') doLogin()">
     </div>
     <button class="btn-login" onclick="doLogin()">🚀 시작하기</button>
@@ -290,7 +290,7 @@ tr:nth-child(even):hover td{background:var(--primary-light)}
     <div class="header-right">
       <div class="user-badge" id="userBadge">👤</div>
       <button class="logout-btn" onclick="doLogout()" title="로그아웃">🚪 나가기</button>
-      <button class="admin-btn" id="adminToggleBtn" onclick="openAdminModal()">⚙️ 관리자</button>
+      <button class="admin-btn" id="adminToggleBtn" style="display:none" onclick="openAdminModal()">⚙️ 관리자</button>
     </div>
   </div>
 </header>
@@ -477,14 +477,21 @@ tr:nth-child(even):hover td{background:var(--primary-light)}
   <!-- 사용자 관리 -->
   <div class="card">
     <div class="card-title"><div class="icon" style="background:var(--admin-light)">👥</div>사용자 계정 관리</div>
-    <div class="alert alert-info" style="margin-bottom:12px">ℹ️ 등록된 사용자만 로그인 가능합니다. 각 사용자는 자신의 데이터만 조회·수정할 수 있습니다.</div>
+    <div class="alert alert-info" style="margin-bottom:12px">ℹ️ 앱에 연결된 계정만 로그인할 수 있습니다. 각 사용자는 자신의 데이터만 조회·수정할 수 있습니다. 비밀번호 재설정과 로그인 계정 삭제는 Supabase 대시보드(Authentication &gt; Users)에서 합니다.</div>
     <div id="userListArea"></div>
+    <div id="userAdminMsg" class="alert alert-warn" style="display:none;margin-top:12px;white-space:pre-line;word-break:break-all"></div>
     <div class="section-divider">새 사용자 추가</div>
+    <div class="alert alert-info" style="margin-bottom:12px;white-space:pre-line">① 아래에 사용자명을 입력하면 로그인 이메일이 표시됩니다.
+② Supabase 대시보드 &gt; Authentication &gt; Users &gt; Add user 에서 그 이메일과 새 비밀번호(8자 이상)로 사용자를 만듭니다. "Auto Confirm User"를 체크하세요.
+③ "사용자 연결"을 누르면 앱 계정이 연결됩니다.</div>
     <div class="form-grid" style="margin-top:0">
-      <div class="form-group"><label>사용자명 <span class="req">*</span></label><input type="text" id="newUsername" placeholder="사용자명"></div>
-      <div class="form-group"><label>코드 <span class="req">*</span></label><input type="text" id="newUserCode" placeholder="코드"></div>
+      <div class="form-group"><label>사용자명 <span class="req">*</span></label><input type="text" id="newUsername" placeholder="사용자명" oninput="updateNewUserEmailHint()"></div>
+      <div class="form-group"><label>역할</label>
+        <select id="newUserRole"><option value="teacher">교사</option><option value="admin">관리자</option></select>
+      </div>
     </div>
-    <div style="margin-top:12px"><button class="btn btn-admin btn-sm" onclick="addUser()">➕ 사용자 추가</button></div>
+    <div style="margin-top:8px;font-size:13px">로그인 이메일: <span id="newUserEmailHint" style="font-family:monospace;word-break:break-all;user-select:all">-</span></div>
+    <div style="margin-top:12px"><button class="btn btn-admin btn-sm" onclick="addUser()">🔗 사용자 연결</button></div>
   </div>
 
   <!-- 사용자별 교육시설 관리 -->
@@ -1002,14 +1009,10 @@ tr:nth-child(even):hover td{background:var(--primary-light)}
 <div class="modal-overlay" id="adminModal">
   <div class="modal">
     <h3>⚙️ 관리자 인증</h3>
-    <p>관리자 전용 계정으로 로그인하세요.</p>
-    <div class="form-group" style="margin-bottom:12px">
-      <label>관리자 아이디</label>
-      <input type="text" id="adminIdInput" placeholder="아이디" onkeyup="if(event.key==='Enter') document.getElementById('adminPwInput').focus()">
-    </div>
+    <p>관리 화면을 열려면 현재 계정(<strong id="adminAccountLabel"></strong>)의 비밀번호를 다시 입력하세요.</p>
     <div class="form-group" style="margin-bottom:16px">
-      <label>관리자 코드</label>
-      <input type="password" id="adminPwInput" placeholder="코드" onkeyup="if(event.key==='Enter') checkAdmin()">
+      <label>비밀번호</label>
+      <input type="password" id="adminPwInput" placeholder="비밀번호" autocomplete="current-password" onkeyup="if(event.key==='Enter') checkAdmin()">
     </div>
     <div style="display:flex;gap:10px">
       <button class="btn btn-outline" onclick="closeAdminModal()" style="flex:1">취소</button>
@@ -1022,7 +1025,7 @@ tr:nth-child(even):hover td{background:var(--primary-light)}
 <div class="modal-overlay" id="confirmModal">
   <div class="modal">
     <h3 id="confirmTitle">확인</h3>
-    <p id="confirmMsg">계속하시겠습니까?</p>
+    <p id="confirmMsg" style="white-space:pre-line;word-break:break-all">계속하시겠습니까?</p>
     <div style="display:flex;gap:10px">
       <button class="btn btn-outline" onclick="closeConfirm()" style="flex:1">취소</button>
       <button class="btn btn-danger" id="confirmOkBtn" style="flex:1">확인</button>
@@ -1067,23 +1070,36 @@ tr:nth-child(even):hover td{background:var(--primary-light)}
 
 <script>
 // ══════════════════════════════════════════════════════
-// 고정 관리자 계정
-// ══════════════════════════════════════════════════════
-const FIXED_ADMIN_ID = '관리자';
-const FIXED_ADMIN_PW = '0217';
-
-// ══════════════════════════════════════════════════════
 // 앱 버전 관리 — 패치 업데이트 시 이 값을 올려주세요
 // 새 버전이 감지되면 사용자에게 자동으로 업데이트 안내 팝업이 표시됩니다
 // ══════════════════════════════════════════════════════
-const APP_VERSION = '4.2';   // ← 패치마다 올리기 (예: 4.0 → 4.1 → 4.2)
+const APP_VERSION = '4.3';   // ← 패치마다 올리기 (예: 4.0 → 4.1 → 4.2)
+
+// ══════════════════════════════════════════════════════
+// 로그인 ID 규칙 — 사용자명 → Supabase Auth 로그인용 합성 이메일
+// 'u' + (NFC 정규화한 사용자명의 UTF-8 바이트 16진수) + '@' + EMAIL_DOMAIN
+// SQL app_private.username_to_email() 과 반드시 같은 규칙·같은 도메인이어야 합니다
+// (이 이메일로는 메일이 발송되지 않음 — 대시보드에서 Auto Confirm 으로 생성)
+// ══════════════════════════════════════════════════════
+const EMAIL_DOMAIN = 'ttreport.invalid';
+const USERNAME_MAX_BYTES = 31;   // 이메일 로컬파트 64자 제한 → 사용자명 UTF-8 31바이트(한글 약 10자)
+
+function normalizeUsername(u) { return String(u ?? '').trim().normalize('NFC'); }
+function usernameBytes(u) { return new TextEncoder().encode(normalizeUsername(u)).length; }
+function usernameToEmail(u) {
+  const bytes = new TextEncoder().encode(normalizeUsername(u));
+  return 'u' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('') + '@' + EMAIL_DOMAIN;
+}
 
 // ══════════════════════════════════════════════════════
 // SUPABASE INIT
+// 세션은 sessionStorage 에 저장 → 탭/브라우저를 닫으면 로그아웃 (공용 PC 대비)
 // ══════════════════════════════════════════════════════
 let sb;
 try {
-  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
+    auth: { storage: window.sessionStorage, persistSession: true, autoRefreshToken: true }
+  });
 } catch(e) {
   console.error('Supabase init failed:', e);
 }
@@ -1091,8 +1107,8 @@ try {
 // ══════════════════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════════════════
-let adminUnlocked = false;
-let currentUser = null;        // { id, username }
+let adminUnlocked = false;     // 관리 탭 표시 여부 (UI 편의 — 실제 권한은 DB RLS 가 결정)
+let currentUser = null;        // { id, username, role }
 let attSelectedFacility = null;
 let attSelectedTime = null;
 let tempStatusMap = {};
@@ -1114,6 +1130,23 @@ async function appInit() {
     toast('⚠️ Supabase 미설정 — 데모 모드로 실행 중', 'error');
     return;
   }
+
+  // 세션 만료(토큰 갱신 실패)·다른 곳에서 로그아웃 → 메모리 상태를 버리고 처음부터
+  sb.auth.onAuthStateChange((event) => {
+    if (event === 'SIGNED_OUT' && currentUser) location.reload();
+  });
+
+  // 같은 탭에서 새로고침한 경우: 남아 있는 세션으로 바로 진입
+  const { data: { session } } = await sb.auth.getSession();
+  if (session) {
+    const profile = await fetchMyProfile(session.user.id);
+    if (profile) {
+      hideLoader();
+      await enterApp({ id: session.user.id, username: profile.username, role: profile.role });
+      return;
+    }
+    await sb.auth.signOut({ scope: 'local' });
+  }
   hideLoader();
   document.getElementById('loginScreen').classList.remove('hidden');
 }
@@ -1124,7 +1157,7 @@ async function appInit() {
 // Supabase는 요청당 최대 1000행만 반환 → range로 페이지 단위 반복 조회
 const SB_PAGE_SIZE = 1000;
 // id 컬럼이 확실한 테이블 — 페이지 경계에서 순서가 흔들리지 않도록 id를 보조 정렬로 사용
-const SB_ID_TABLES = ['journals', 'attendance', 'students', 'app_users'];
+const SB_ID_TABLES = ['journals', 'attendance', 'students'];
 
 // build: 호출할 때마다 새 쿼리(필터·정렬 포함)를 만들어 반환하는 함수
 // 반환: { data, error } — 오류 시 data = null
@@ -1188,45 +1221,82 @@ function localSet(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 // ══════════════════════════════════════════════════════
 // LOGIN
 // ══════════════════════════════════════════════════════
+// 데모 모드(로컬 전용) 기본 사용자 — Supabase 를 쓰지 않을 때만 사용
+const DEMO_USERS_DEFAULT = [
+  { id: 1, username: '교사1', code: '1234', role: 'admin' },
+  { id: 2, username: '교사2', code: '5678', role: 'teacher' }
+];
+
+// 로그인한 Auth 사용자의 프로필(사용자명·역할). 없거나 조회 실패 시 null
+async function fetchMyProfile(userId) {
+  const { data, error } = await sb.from('profiles')
+    .select('username, role').eq('user_id', userId).maybeSingle();
+  if (error) { console.error('profiles', error); return null; }
+  return data;
+}
+
 async function doLogin() {
-  const username = document.getElementById('loginUsername').value.trim();
-  const code     = document.getElementById('loginCode').value.trim();
+  const username = normalizeUsername(document.getElementById('loginUsername').value);
+  const password = document.getElementById('loginCode').value;
   const errEl    = document.getElementById('loginError');
   errEl.classList.remove('show');
+  const fail = (msg) => {
+    hideLoader();
+    errEl.textContent = '❌ ' + msg;
+    errEl.classList.add('show');
+    document.getElementById('loginCode').value = '';
+  };
 
-  if (!username || !code) {
-    errEl.textContent = '❌ 사용자명과 코드를 모두 입력해주세요.';
+  if (!username || !password) {
+    errEl.textContent = '❌ 사용자명과 비밀번호를 모두 입력해주세요.';
     errEl.classList.add('show'); return;
   }
 
   loader('로그인 확인 중...');
-  let found = null;
 
   if (isDemo()) {
     // 데모 모드: localStorage 에서 확인
-    const users = localGet('demo_users', [
-      { id: 1, username: '교사1', code: '1234' },
-      { id: 2, username: '교사2', code: '5678' }
-    ]);
-    found = users.find(u => u.username === username && u.code === code);
-    if (found) localSet('demo_users', users); // ensure default saved
-  } else {
-    const rows = await sbSelect('app_users', { username, code });
-    found = rows[0] || null;
-  }
-
-  hideLoader();
-  if (!found) {
-    errEl.textContent = '❌ 사용자명 또는 코드가 올바르지 않습니다.';
-    errEl.classList.add('show');
-    document.getElementById('loginCode').value = '';
+    const users = localGet('demo_users', DEMO_USERS_DEFAULT);
+    const found = users.find(u => u.username === username && u.code === password);
+    if (!found) return fail('사용자명 또는 비밀번호가 올바르지 않습니다.');
+    localSet('demo_users', users); // ensure default saved
+    hideLoader();
+    await enterApp({ id: found.id, username: found.username, role: found.role || 'teacher' });
     return;
   }
 
-  currentUser = { id: found.id, username: found.username };
+  if (usernameBytes(username) > USERNAME_MAX_BYTES) {
+    return fail('사용자명 또는 비밀번호가 올바르지 않습니다.');
+  }
+  const { data, error } = await sb.auth.signInWithPassword({
+    email: usernameToEmail(username), password
+  });
+  if (error || !data?.user) {
+    console.error('signIn', error);
+    if (error?.status === 429) return fail('로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요.');
+    if (error?.status === 400 || error?.status === 401) return fail('사용자명 또는 비밀번호가 올바르지 않습니다.');
+    return fail('로그인 중 오류가 발생했습니다. 네트워크 상태를 확인해주세요.');
+  }
+
+  const profile = await fetchMyProfile(data.user.id);
+  if (!profile) {
+    await sb.auth.signOut({ scope: 'local' });
+    return fail('앱에 등록되지 않은 사용자입니다. 관리자에게 문의하세요.');
+  }
+
+  hideLoader();
+  await enterApp({ id: data.user.id, username: profile.username, role: profile.role });
+}
+
+// 로그인 성공 후 메인 화면 진입 (로그인 / 세션 복원 공통)
+async function enterApp(user) {
+  currentUser = user;
+  document.getElementById('loginCode').value = '';
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('mainApp').style.display = 'block';
   document.getElementById('userBadge').textContent = '👤 ' + currentUser.username;
+  // 관리자 버튼은 admin 역할 계정에만 표시 (표시 여부와 무관하게 권한은 RLS 가 강제)
+  document.getElementById('adminToggleBtn').style.display = currentUser.role === 'admin' ? '' : 'none';
   await loadOptions();
   renderStudentList();
   document.getElementById('todayDateLabel').textContent = today();
@@ -1284,6 +1354,7 @@ function rebuildDropdowns() {
 // TAB SWITCHING
 // ══════════════════════════════════════════════════════
 function switchTab(tab) {
+  if (tab === 'admin' && !adminUnlocked) return;
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + tab).classList.add('active');
@@ -1684,30 +1755,71 @@ function openAdminModal() {
     toast('관리자 모드 해제');
     return;
   }
-  document.getElementById('adminIdInput').value = '';
+  if (!currentUser || currentUser.role !== 'admin') {
+    toast('관리자 계정으로 로그인해야 합니다', 'error'); return;
+  }
+  document.getElementById('adminAccountLabel').textContent = currentUser.username;
   document.getElementById('adminPwInput').value = '';
   document.getElementById('adminModal').classList.add('show');
-  setTimeout(() => document.getElementById('adminIdInput').focus(), 100);
+  setTimeout(() => document.getElementById('adminPwInput').focus(), 100);
 }
 
 function closeAdminModal() {
   document.getElementById('adminModal').classList.remove('show');
 }
 
-function checkAdmin() {
-  const id = document.getElementById('adminIdInput').value.trim();
+// 관리 탭 열기 전 재인증: 자리를 비운 사이 다른 사람이 관리 화면을 여는 것을 막는 용도
+// 실제 관리자 권한은 DB(profiles.role + RLS)가 결정 — 여기서는 역할을 서버에서 다시 확인만 함
+async function checkAdmin() {
   const pw = document.getElementById('adminPwInput').value;
-  if (id === FIXED_ADMIN_ID && pw === FIXED_ADMIN_PW) {
-    adminUnlocked = true;
-    closeAdminModal();
-    document.getElementById('adminTabBtn').style.display = 'flex';
-    document.getElementById('adminToggleBtn').classList.add('active');
-    switchTab('admin');
-    toast('🔓 관리자 모드 활성화', 'success');
+  if (!pw) { toast('비밀번호를 입력하세요', 'error'); return; }
+  if (!currentUser || currentUser.role !== 'admin') { toast('관리자 계정이 아닙니다', 'error'); return; }
+
+  loader('관리자 확인 중...');
+  let role = currentUser.role;
+  if (!isDemo()) {
+    const { data, error } = await sb.auth.signInWithPassword({
+      email: usernameToEmail(currentUser.username), password: pw
+    });
+    if (error || !data?.user) {
+      hideLoader();
+      document.getElementById('adminPwInput').value = '';
+      toast(error?.status === 429 ? '시도가 너무 많습니다. 잠시 후 다시 시도하세요' : '비밀번호가 올바르지 않습니다', 'error');
+      return;
+    }
+    if (data.user.id !== currentUser.id) {
+      // 다른 계정으로 세션이 바뀐 경우 — 상태가 섞이지 않도록 완전히 로그아웃
+      await sb.auth.signOut({ scope: 'local' });
+      location.reload();
+      return;
+    }
+    const profile = await fetchMyProfile(data.user.id);
+    role = profile?.role;
   } else {
-    toast('아이디 또는 코드가 올바르지 않습니다', 'error');
-    document.getElementById('adminPwInput').value = '';
+    const users = localGet('demo_users', DEMO_USERS_DEFAULT);
+    const me = users.find(u => String(u.id) === String(currentUser.id));
+    if (!me || me.code !== pw) {
+      hideLoader();
+      document.getElementById('adminPwInput').value = '';
+      toast('비밀번호가 올바르지 않습니다', 'error');
+      return;
+    }
   }
+  hideLoader();
+
+  if (role !== 'admin') {
+    currentUser.role = role || 'teacher';
+    document.getElementById('adminToggleBtn').style.display = 'none';
+    closeAdminModal();
+    toast('관리자 권한이 없는 계정입니다', 'error');
+    return;
+  }
+  adminUnlocked = true;
+  closeAdminModal();
+  document.getElementById('adminTabBtn').style.display = 'flex';
+  document.getElementById('adminToggleBtn').classList.add('active');
+  switchTab('admin');
+  toast('🔓 관리자 모드 활성화', 'success');
 }
 
 async function renderAdminPage() {
@@ -1787,10 +1899,47 @@ function resetDailyFilter() {
 }
 
 // ── 사용자 관리 ──
+// 계정(비밀번호)은 Supabase Auth, 앱 사용자명·역할은 profiles 테이블.
+// 쓰기는 관리자 RPC(admin_link_profile / admin_rename_user)와 profiles RLS 로 서버에서 검사합니다.
 async function getUserList() {
-  if (isDemo()) return localGet('demo_users', [{id:1,username:'교사1',code:'1234'},{id:2,username:'교사2',code:'5678'}]);
-  return sbSelect('app_users', {}, { col: 'username', asc: true });
+  if (isDemo()) return localGet('demo_users', DEMO_USERS_DEFAULT)
+    .map(u => ({ user_id: u.id, username: u.username, role: u.role || 'teacher' }));
+  const { data, error } = await sb.from('profiles')
+    .select('user_id, username, role').order('username', { ascending: true });
+  if (error) { console.error('profiles', error); return []; }
+  return data || [];
 }
+
+// 관리자 RPC/profiles 오류 → 사용자에게 보여줄 문구
+function userAdminErrorMessage(error) {
+  if (!error) return '';
+  if (error.code === '42501') return '관리자 권한이 없습니다. 다시 로그인해주세요.';
+  if (error.code === '23505') return '이미 다른 계정이 사용 중인 사용자명입니다.';
+  if (error.code === 'P0002' || error.code === '22023') return error.message;
+  return '요청 처리 중 오류가 발생했습니다 — 다시 시도해주세요.';
+}
+
+function showUserAdminMsg(msg) {
+  const el = document.getElementById('userAdminMsg');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.display = msg ? '' : 'none';
+}
+
+function checkUsernameInput(name) {
+  if (!name) return '사용자명을 입력하세요';
+  if (usernameBytes(name) > USERNAME_MAX_BYTES) return '사용자명이 너무 깁니다 (한글 약 10자, 영문 31자 이하)';
+  return '';
+}
+
+function updateNewUserEmailHint() {
+  const name = normalizeUsername(document.getElementById('newUsername').value);
+  const el = document.getElementById('newUserEmailHint');
+  if (!name) { el.textContent = '-'; return; }
+  el.textContent = usernameBytes(name) > USERNAME_MAX_BYTES ? '(사용자명이 너무 깁니다)' : usernameToEmail(name);
+}
+
+const ROLE_LABELS = { admin: '관리자', teacher: '교사' };
 
 async function renderUserList() {
   const users = await getUserList();
@@ -1798,83 +1947,125 @@ async function renderUserList() {
   if (!users.length) {
     area.innerHTML = '<div class="empty-state" style="padding:20px"><p>사용자가 없습니다.</p></div>'; return;
   }
-  let html = '<div class="table-wrap"><table class="user-table"><thead><tr><th>#</th><th>사용자명</th><th>코드</th><th>관리</th></tr></thead><tbody>';
+  let html = '<div class="table-wrap"><table class="user-table"><thead><tr><th>#</th><th>사용자명</th><th>역할</th><th>로그인 이메일</th><th>관리</th></tr></thead><tbody>';
   users.forEach((u,i) => {
+    const isMe = currentUser && String(u.user_id) === String(currentUser.id);
     html += `<tr><td style="color:var(--text-muted)">${i+1}</td>
-      <td><strong>${escHtml(u.username)}</strong></td>
-      <td><span style="font-family:monospace;background:var(--bg);padding:2px 8px;border-radius:4px">${escHtml(u.code)}</span></td>
+      <td><strong>${escHtml(u.username)}</strong>${isMe ? ' <span style="color:var(--text-muted);font-size:12px">(나)</span>' : ''}</td>
+      <td>${escHtml(ROLE_LABELS[u.role] || u.role)}</td>
+      <td><span style="font-family:monospace;font-size:12px;word-break:break-all;user-select:all">${escHtml(usernameToEmail(u.username))}</span></td>
       <td>
-        <button class="btn btn-outline btn-sm" onclick="editUser('${esc(u.id)}','${esc(u.username)}','${esc(u.code)}')" style="margin-right:6px">✏️ 수정</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteUser('${esc(u.id)}')">삭제</button>
+        ${isMe ? '' : `<button class="btn btn-outline btn-sm" onclick="editUser('${esc(u.user_id)}','${esc(u.username)}')" style="margin-right:6px">✏️ 이름 변경</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteUser('${esc(u.user_id)}','${esc(u.username)}')">연결 해제</button>`}
       </td></tr>`;
   });
   html += '</tbody></table></div>';
   area.innerHTML = html;
 }
 
+// 대시보드에서 만든 Auth 사용자를 앱 사용자(profiles)로 연결
 async function addUser() {
-  const username = document.getElementById('newUsername').value.trim();
-  const code     = document.getElementById('newUserCode').value.trim();
-  if (!username || !code) { toast('사용자명과 코드를 모두 입력하세요','error'); return; }
+  const username = normalizeUsername(document.getElementById('newUsername').value);
+  const role     = document.getElementById('newUserRole').value === 'admin' ? 'admin' : 'teacher';
+  const invalid  = checkUsernameInput(username);
+  if (invalid) { toast(invalid, 'error'); return; }
 
-  loader('추가 중...');
+  loader('연결 중...');
   if (isDemo()) {
-    const users = localGet('demo_users', []);
+    const users = localGet('demo_users', DEMO_USERS_DEFAULT);
     if (users.find(u => u.username === username)) { hideLoader(); toast('이미 존재하는 사용자명입니다','error'); return; }
-    users.push({ id: Date.now(), username, code });
+    users.push({ id: Date.now(), username, code: '1234', role });
     localSet('demo_users', users);
   } else {
-    const existing = await sbSelect('app_users', { username });
-    if (existing.length) { hideLoader(); toast('이미 존재하는 사용자명입니다','error'); return; }
-    const res = await sbInsert('app_users', { username, code });
-    if (!res) { hideLoader(); toast('❌ 사용자 추가 실패 — 다시 시도해주세요', 'error'); return; }
-  }
-  hideLoader();
-  document.getElementById('newUsername').value = '';
-  document.getElementById('newUserCode').value = '';
-  await renderUserList();
-  toast('✅ 사용자 추가 완료', 'success');
-}
-
-async function editUser(id, curName, curCode) {
-  const newName = prompt('사용자명 수정 (현재: ' + curName + ')', curName);
-  if (newName === null) return;
-  const newCode = prompt('코드 수정 (현재: ' + curCode + ')', curCode);
-  if (newCode === null) return;
-  if (!newName.trim() || !newCode.trim()) { toast('사용자명과 코드를 모두 입력하세요','error'); return; }
-
-  loader('수정 중...');
-  if (isDemo()) {
-    const users = localGet('demo_users', []);
-    const idx = users.findIndex(u => String(u.id) === String(id));
-    if (idx >= 0) { users[idx].username = newName.trim(); users[idx].code = newCode.trim(); }
-    localSet('demo_users', users);
-  } else {
-    const { error } = await sb.from('app_users').update({ username: newName.trim(), code: newCode.trim() }).eq('id', id);
+    const { error } = await sb.rpc('admin_link_profile', { p_username: username, p_role: role });
     if (error) {
-      console.error('update app_users', error);
-      hideLoader(); toast('❌ 사용자 수정 실패 — 다시 시도해주세요', 'error'); return;
+      console.error('admin_link_profile', error);
+      hideLoader();
+      const msg = userAdminErrorMessage(error);
+      showUserAdminMsg('❌ 사용자 연결 실패: ' + msg);
+      toast('❌ 사용자 연결 실패', 'error');
+      return;
     }
   }
   hideLoader();
+  showUserAdminMsg('');
+  document.getElementById('newUsername').value = '';
+  updateNewUserEmailHint();
   await renderUserList();
-  toast('✅ 수정 완료', 'success');
+  await renderFacilityUserTabs();
+  await populateAdminAttFilters();
+  toast('✅ 사용자 연결 완료', 'success');
 }
 
-async function deleteUser(id) {
-  showConfirm('사용자 삭제', '이 사용자를 삭제하시겠습니까?', async () => {
-    loader('삭제 중...');
-    if (isDemo()) {
-      const users = localGet('demo_users',[]);
-      localSet('demo_users', users.filter(u => String(u.id) !== String(id)));
-    } else {
-      const ok = await sbDelete('app_users', id);
-      if (!ok) { hideLoader(); toast('❌ 사용자 삭제 실패 — 다시 시도해주세요', 'error'); return; }
-    }
-    hideLoader();
-    await renderUserList();
-    toast('삭제되었습니다');
-  });
+// 사용자명 변경: 그 사용자의 학생·출석·일지·시설 owner 까지 한 트랜잭션으로 함께 변경 (admin_rename_user)
+async function editUser(userId, curName) {
+  const input = prompt('새 사용자명 (현재: ' + curName + ')', curName);
+  if (input === null) return;
+  const newName = normalizeUsername(input);
+  const invalid = checkUsernameInput(newName);
+  if (invalid) { toast(invalid, 'error'); return; }
+  if (newName === curName) return;
+
+  const newEmail = usernameToEmail(newName);
+  showConfirm('사용자명 변경',
+    `'${curName}' → '${newName}'\n\n이 사용자의 학생·출석·일지·교육시설 기록도 모두 새 이름으로 함께 바뀝니다.\n\n` +
+    `변경 후 Supabase 대시보드(Authentication > Users)에서 이 사용자의 이메일을\n${newEmail}\n로 바꿔야 새 이름으로 로그인할 수 있습니다.`,
+    async () => {
+      loader('변경 중...');
+      if (isDemo()) {
+        const users = localGet('demo_users', DEMO_USERS_DEFAULT);
+        const idx = users.findIndex(u => String(u.id) === String(userId));
+        if (idx >= 0) users[idx].username = newName;
+        localSet('demo_users', users);
+      } else {
+        const { error } = await sb.rpc('admin_rename_user', { p_old: curName, p_new: newName });
+        if (error) {
+          console.error('admin_rename_user', error);
+          hideLoader();
+          showUserAdminMsg('❌ 사용자명 변경 실패: ' + userAdminErrorMessage(error));
+          toast('❌ 사용자명 변경 실패', 'error');
+          return;
+        }
+      }
+      hideLoader();
+      if (selectedFacilityUser === curName) selectedFacilityUser = newName;
+      showUserAdminMsg(`✅ '${curName}' → '${newName}' 변경 완료.\n` +
+        `대시보드(Authentication > Users)에서 이 사용자의 이메일을 아래 값으로 바꿔주세요. 바꾸기 전까지는 로그인할 수 없습니다.\n${newEmail}`);
+      await renderUserList();
+      await renderFacilityUserTabs();
+      await populateAdminAttFilters();
+      toast('✅ 사용자명 변경 완료', 'success');
+    });
+}
+
+// 앱 연결 해제: profiles 행만 삭제 → 그 계정은 즉시 어떤 데이터에도 접근 불가.
+// 로그인 계정(Auth) 삭제는 대시보드에서. 데이터 행은 남으며 관리자는 계속 조회 가능.
+async function deleteUser(userId, username) {
+  showConfirm('사용자 연결 해제',
+    `'${username}' 계정의 앱 접근 권한을 해제하시겠습니까?\n\n` +
+    `학생·출석·일지 기록은 그대로 남습니다. 로그인 계정 자체의 삭제는 Supabase 대시보드(Authentication > Users)에서 하세요.`,
+    async () => {
+      loader('해제 중...');
+      if (isDemo()) {
+        const users = localGet('demo_users', DEMO_USERS_DEFAULT);
+        localSet('demo_users', users.filter(u => String(u.id) !== String(userId)));
+      } else {
+        const { data, error } = await sb.from('profiles').delete().eq('user_id', userId).select('user_id');
+        if (error || !data?.length) {
+          console.error('delete profiles', error);
+          hideLoader();
+          toast('❌ 연결 해제 실패 — ' + (error ? userAdminErrorMessage(error) : '권한이 없거나 이미 삭제되었습니다'), 'error');
+          return;
+        }
+      }
+      hideLoader();
+      if (selectedFacilityUser === username) selectedFacilityUser = null;
+      showUserAdminMsg('');
+      await renderUserList();
+      await renderFacilityUserTabs();
+      await populateAdminAttFilters();
+      toast('연결이 해제되었습니다');
+    });
 }
 
 // ══════════════════════════════════════════════════════
@@ -4079,35 +4270,21 @@ appInit();
 
 // 로그아웃
 function doLogout() {
-  showConfirm('로그아웃', '로그아웃 하시겠습니까?', () => {
-    // 상태 초기화
-    currentUser        = null;
-    adminUnlocked      = false;
-    attSelectedFacility = null;
-    attSelectedTime    = null;
-    tempStatusMap      = {};
-    cachedFacilities   = [];
-    cachedTimes        = [];
-    anewStudentMap     = {};
-
-    // 관리자 탭 숨기기
-    document.getElementById('adminTabBtn').style.display = 'none';
-    document.getElementById('adminToggleBtn').classList.remove('active');
-
-    // 메인 앱 숨기기 → 로그인 화면 표시
-    document.getElementById('mainApp').style.display = 'none';
-    document.getElementById('loginScreen').classList.remove('hidden');
-
-    // 로그인 입력 초기화
-    document.getElementById('loginUsername').value = '';
-    document.getElementById('loginCode').value     = '';
-    document.getElementById('loginError').classList.remove('show');
-
-    // 탭 초기화 (등록 탭으로)
-    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById('tab-reg').classList.add('active');
-    document.querySelector('.tab-btn[data-tab="reg"]').classList.add('active');
+  showConfirm('로그아웃', '로그아웃 하시겠습니까?', async () => {
+    loader('로그아웃 중...');
+    currentUser = null;   // SIGNED_OUT 이벤트에서 중복 새로고침하지 않도록 먼저 비움
+    if (!isDemo()) {
+      // 서버 세션(리프레시 토큰) 폐기 + 이 탭의 세션 삭제
+      const { error } = await sb.auth.signOut({ scope: 'local' });
+      if (error) {
+        // 네트워크 오류 등으로 실패하면 세션이 브라우저에 남으므로 직접 삭제 (sessionStorage 는 세션 저장 전용)
+        console.error('signOut', error);
+        try { sessionStorage.clear(); } catch {}
+      }
+    }
+    // 공용 PC 대비: 공지 캐시 삭제 후 새로고침으로 메모리 캐시(학생 목록 등)까지 모두 비움
+    try { localStorage.removeItem(NOTICE_KEY); } catch {}
+    location.reload();
   });
 }
 </script>
