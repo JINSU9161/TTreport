@@ -1,0 +1,20 @@
+name = "ttreport"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = false
+
+# ttreport.connectnai.com 을 이 Worker의 Custom Domain으로 연결합니다.
+# 배포 시 DNS 레코드와 인증서가 자동 생성됩니다.
+routes = [
+  { pattern = "ttreport.connectnai.com", custom_domain = true }
+]
+
+[vars]
+GITHUB_OWNER = "JINSU9161"
+GITHUB_REPO = "TTreport"
+GITHUB_BRANCH = "main"
+CACHE_TTL = "300"
+
+# GITHUB_TOKEN 은 비밀값이므로 여기에 쓰지 말고 아래 명령으로 등록하세요.
+#   npx wrangler secret put GITHUB_TOKEN
+# 로컬 테스트용으로는 .dev.vars 파일에 GITHUB_TOKEN=... 을 넣을 수 있습니다 (git에 올리지 마세요).
