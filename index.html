@@ -1076,7 +1076,7 @@ const FIXED_ADMIN_PW = '0217';
 // 앱 버전 관리 — 패치 업데이트 시 이 값을 올려주세요
 // 새 버전이 감지되면 사용자에게 자동으로 업데이트 안내 팝업이 표시됩니다
 // ══════════════════════════════════════════════════════
-const APP_VERSION = '4.1';   // ← 패치마다 올리기 (예: 4.0 → 4.1 → 4.2)
+const APP_VERSION = '4.2';   // ← 패치마다 올리기 (예: 4.0 → 4.1 → 4.2)
 
 // ══════════════════════════════════════════════════════
 // SUPABASE INIT
@@ -1121,11 +1121,33 @@ async function appInit() {
 // ══════════════════════════════════════════════════════
 // SUPABASE HELPERS — 각 테이블은 Supabase SQL로 생성 필요
 // ══════════════════════════════════════════════════════
+// Supabase는 요청당 최대 1000행만 반환 → range로 페이지 단위 반복 조회
+const SB_PAGE_SIZE = 1000;
+// id 컬럼이 확실한 테이블 — 페이지 경계에서 순서가 흔들리지 않도록 id를 보조 정렬로 사용
+const SB_ID_TABLES = ['journals', 'attendance', 'students', 'app_users'];
+
+// build: 호출할 때마다 새 쿼리(필터·정렬 포함)를 만들어 반환하는 함수
+// 반환: { data, error } — 오류 시 data = null
+async function sbSelectAll(build) {
+  const rows = [];
+  for (let from = 0; ; from += SB_PAGE_SIZE) {
+    const { data, error } = await build().range(from, from + SB_PAGE_SIZE - 1);
+    if (error) { console.error('select(paged)', error); return { data: null, error }; }
+    const page = data || [];
+    for (const r of page) rows.push(r);
+    if (page.length < SB_PAGE_SIZE) break;
+  }
+  return { data: rows, error: null };
+}
+
 async function sbSelect(table, filters={}, order=null) {
-  let q = sb.from(table).select('*');
-  Object.entries(filters).forEach(([k,v]) => { q = q.eq(k, v); });
-  if (order) q = q.order(order.col, { ascending: order.asc ?? true });
-  const { data, error } = await q;
+  const { data, error } = await sbSelectAll(() => {
+    let q = sb.from(table).select('*');
+    Object.entries(filters).forEach(([k,v]) => { q = q.eq(k, v); });
+    if (order) q = q.order(order.col, { ascending: order.asc ?? true });
+    if (SB_ID_TABLES.includes(table)) q = q.order('id', { ascending: true });
+    return q;
+  });
   if (error) { console.error(table, error); return []; }
   return data || [];
 }
@@ -1243,9 +1265,9 @@ function rebuildDropdowns() {
     if (!el) return;
     const cur = el.value;
     if (id === 'reg-filter-facility' || id === 'view-facility') {
-      el.innerHTML = '<option value="">전체</option>' + cachedFacilities.map(f => `<option value="${esc(f)}">${f}</option>`).join('');
+      el.innerHTML = '<option value="">전체</option>' + cachedFacilities.map(f => `<option value="${escHtml(f)}">${escHtml(f)}</option>`).join('');
     } else {
-      el.innerHTML = '<option value="">-- 선택 --</option>' + cachedFacilities.map(f => `<option value="${esc(f)}">${f}</option>`).join('');
+      el.innerHTML = '<option value="">-- 선택 --</option>' + cachedFacilities.map(f => `<option value="${escHtml(f)}">${escHtml(f)}</option>`).join('');
     }
     if (cur) el.value = cur;
   });
@@ -1253,7 +1275,7 @@ function rebuildDropdowns() {
   const tEl = document.getElementById('reg-time');
   if (tEl) {
     const cur = tEl.value;
-    tEl.innerHTML = '<option value="">-- 선택 --</option>' + cachedTimes.map(t => `<option value="${esc(t)}">${t}</option>`).join('');
+    tEl.innerHTML = '<option value="">-- 선택 --</option>' + cachedTimes.map(t => `<option value="${escHtml(t)}">${escHtml(t)}</option>`).join('');
     if (cur) tEl.value = cur;
   }
 }
@@ -1296,7 +1318,8 @@ async function registerStudent() {
     students.push({ ...obj, id: Date.now() });
     localSet('demo_students', students);
   } else {
-    await sbInsert('students', { ...obj, owner: currentUser.username });
+    const res = await sbInsert('students', { ...obj, owner: currentUser.username });
+    if (!res) { hideLoader(); toast('❌ 학생 등록 실패 — 다시 시도해주세요', 'error'); return; }
   }
 
   hideLoader();
@@ -1326,7 +1349,7 @@ async function renderStudentList() {
   const filterEl = document.getElementById('reg-filter-facility');
   if (filterEl) {
     const facs = [...new Set(allMy.map(s => s.facility))];
-    filterEl.innerHTML = '<option value="">전체</option>' + facs.map(f => `<option value="${esc(f)}">${f}</option>`).join('');
+    filterEl.innerHTML = '<option value="">전체</option>' + facs.map(f => `<option value="${escHtml(f)}">${escHtml(f)}</option>`).join('');
     if (filter) filterEl.value = filter;
   }
 
@@ -1343,16 +1366,16 @@ async function renderStudentList() {
   });
   let html = '';
   Object.keys(grouped).forEach(fac => {
-    html += `<div style="margin-bottom:12px"><div style="font-weight:700;font-size:13px;color:var(--primary);padding:6px 10px;background:var(--primary-light);border-radius:6px;margin-bottom:8px">🏫 ${fac}</div>`;
+    html += `<div style="margin-bottom:12px"><div style="font-weight:700;font-size:13px;color:var(--primary);padding:6px 10px;background:var(--primary-light);border-radius:6px;margin-bottom:8px">🏫 ${escHtml(fac)}</div>`;
     Object.keys(grouped[fac]).forEach(t => {
-      html += `<div style="margin-left:8px;margin-bottom:6px"><div style="font-size:12px;font-weight:600;color:var(--text-sub);margin-bottom:4px">⏰ ${t}</div>`;
+      html += `<div style="margin-left:8px;margin-bottom:6px"><div style="font-size:12px;font-weight:600;color:var(--text-sub);margin-bottom:4px">⏰ ${escHtml(t)}</div>`;
       grouped[fac][t].forEach(s => {
         html += `<div class="attendance-item" style="margin-left:8px;margin-bottom:4px">
-          <div class="student-info"><div class="student-name">${s.name}</div>
-          <div class="student-meta">${s.gender||'-'} · ${s.birth?s.birth.replace(/-/g,'.'):'-'}</div></div>
+          <div class="student-info"><div class="student-name">${escHtml(s.name)}</div>
+          <div class="student-meta">${escHtml(s.gender||'-')} · ${s.birth?escHtml(String(s.birth).replace(/-/g,'.')):'-'}</div></div>
           <div style="display:flex;gap:6px">
-            <button class="btn btn-outline btn-sm" onclick="editStudent('${s.id}')">✏️ 수정</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteStudent('${s.id}')">삭제</button>
+            <button class="btn btn-outline btn-sm" onclick="editStudent('${esc(s.id)}')">✏️ 수정</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteStudent('${esc(s.id)}')">삭제</button>
           </div></div>`;
       });
       html += '</div>';
@@ -1369,7 +1392,8 @@ async function deleteStudent(id) {
       let s = localGet('demo_students', []);
       localSet('demo_students', s.filter(x => String(x.id) !== String(id)));
     } else {
-      await sbDelete('students', id);
+      const ok = await sbDelete('students', id);
+      if (!ok) { hideLoader(); toast('❌ 학생 삭제 실패 — 다시 시도해주세요', 'error'); return; }
     }
     hideLoader();
     renderStudentList();
@@ -1394,7 +1418,7 @@ async function refreshAttTab() {
   grid.innerHTML = facilities.map(f => {
     const cnt = students.filter(s => s.facility === f).length;
     const sel = f === attSelectedFacility ? ' selected' : '';
-    return `<div class="facility-card${sel}" onclick="selectAttFacility('${esc(f)}')">${f}<div class="count">${cnt}명</div></div>`;
+    return `<div class="facility-card${sel}" onclick="selectAttFacility('${esc(f)}')">${escHtml(f)}<div class="count">${cnt}명</div></div>`;
   }).join('');
 
   if (attSelectedFacility && facilities.includes(attSelectedFacility)) {
@@ -1421,7 +1445,7 @@ async function renderAttTimes() {
   tc.style.display = 'block';
   chips.innerHTML = times.map(t => {
     const sel = t === attSelectedTime ? ' selected' : '';
-    return `<div class="time-chip${sel}" onclick="selectAttTime('${esc(t)}')">${t}</div>`;
+    return `<div class="time-chip${sel}" onclick="selectAttTime('${esc(t)}')">${escHtml(t)}</div>`;
   }).join('');
 }
 
@@ -1463,21 +1487,27 @@ async function renderAttendanceList() {
   const listEl = document.getElementById('attendanceList');
   if (!students.length) {
     listEl.innerHTML = '<div class="empty-state"><p>이 시간에 등록된 학생이 없습니다</p></div>';
-    updateAttStats({}, 0); return;
+    updateAttStats({}, []); return;
   }
 
   listEl.innerHTML = students.map(s => {
     const status = statusMap[s.id] || '';
-    return `<div class="attendance-item${!status?' unchecked':''}" id="att-${s.id}">
-      <div class="student-info"><div class="student-name">${s.name}</div>
-      <div class="student-meta">${s.gender||''} · ${s.birth||''}</div></div>
+    return `<div class="attendance-item${!status?' unchecked':''}" id="att-${escHtml(s.id)}">
+      <div class="student-info"><div class="student-name">${escHtml(s.name)}</div>
+      <div class="student-meta">${escHtml(s.gender||'')} · ${escHtml(s.birth||'')}</div></div>
       <div class="status-btns">
-        <button class="status-btn ${status==='출석'?'present':''}" onclick="setStatus('${s.id}','출석')">출석</button>
-        <button class="status-btn ${status==='결석'?'absent':''}" onclick="setStatus('${s.id}','결석')">결석</button>
-        <button class="status-btn ${status==='지각'?'late':''}" onclick="setStatus('${s.id}','지각')">지각</button>
+        <button class="status-btn ${status==='출석'?'present':''}" onclick="setStatus('${esc(s.id)}','출석')">출석</button>
+        <button class="status-btn ${status==='결석'?'absent':''}" onclick="setStatus('${esc(s.id)}','결석')">결석</button>
+        <button class="status-btn ${status==='지각'?'late':''}" onclick="setStatus('${esc(s.id)}','지각')">지각</button>
       </div></div>`;
   }).join('');
-  updateAttStats(statusMap, students.length);
+  updateAttStats(statusMap, students.map(s => String(s.id)));
+}
+
+// 현재 출석 목록에 렌더된 학생 ID 목록
+function getRenderedAttIds() {
+  return [...document.querySelectorAll('#attendanceList .attendance-item[id^="att-"]')]
+    .map(el => el.id.slice(4));
 }
 
 function setStatus(id, status) {
@@ -1491,13 +1521,13 @@ function setStatus(id, status) {
       if (b.textContent === status) b.classList.add(status==='출석'?'present':status==='결석'?'absent':'late');
     });
   }
-  const students_count = document.querySelectorAll('[id^="att-"]').length;
-  updateAttStats(tempStatusMap, students_count);
+  updateAttStats(tempStatusMap, getRenderedAttIds());
 }
 
-function updateAttStats(sm, total) {
-  const vals = Object.entries(sm).filter(([k])=>k!=='_loaded').map(([,v])=>v);
-  document.getElementById('statTotal').textContent   = total || 0;
+// ids: 현재 화면에 표시된 학생 ID 목록 — 목록에 없는 학생(삭제/이동)의 상태는 집계하지 않음
+function updateAttStats(sm, ids) {
+  const vals = ids.map(id => sm[id]).filter(Boolean);
+  document.getElementById('statTotal').textContent   = ids.length;
   document.getElementById('statPresent').textContent = vals.filter(v=>v==='출석').length;
   document.getElementById('statAbsent').textContent  = vals.filter(v=>v==='결석').length;
   document.getElementById('statLate').textContent    = vals.filter(v=>v==='지각').length;
@@ -1520,7 +1550,7 @@ async function saveAttendance() {
   const errors = [];
   const unchecked = students.filter(s => !clean[s.id]);
   if (unchecked.length) {
-    errors.push(`⚠️ 미체크 학생 ${unchecked.length}명: ${unchecked.map(s=>s.name).join(', ')}`);
+    errors.push(`⚠️ 미체크 학생 ${unchecked.length}명: ${unchecked.map(s=>escHtml(s.name)).join(', ')}`);
     unchecked.forEach(s => { const el=document.getElementById('att-'+s.id); if(el) el.classList.add('unchecked'); });
   }
   if (!content) { errors.push('⚠️ 교육내용을 입력해주세요.'); contentEl.classList.add('req-err'); }
@@ -1553,14 +1583,22 @@ async function saveAttendance() {
     localSet('demo_journals', jrns);
   } else {
     // upsert via RPC or upsert by unique constraint
-    await sb.from('attendance').upsert({
+    const { error: aErr } = await sb.from('attendance').upsert({
       facility: attSelectedFacility, time: attSelectedTime, date: dateKey,
       status_map: clean, owner: currentUser.username, saved_at: now
     }, { onConflict: 'facility,time,date,owner' });
-    await sb.from('journals').upsert({
+    if (aErr) {
+      console.error('attendance upsert', aErr);
+      hideLoader(); toast('❌ 출석 저장 실패 — 다시 시도해주세요', 'error'); return;
+    }
+    const { error: jErr } = await sb.from('journals').upsert({
       facility: attSelectedFacility, time: attSelectedTime, date: dateKey,
       content, note, status_map: clean, owner: currentUser.username, saved_at: now
     }, { onConflict: 'facility,time,date,owner' });
+    if (jErr) {
+      console.error('journals upsert', jErr);
+      hideLoader(); toast('❌ 일지 저장 실패 — 다시 시도해주세요', 'error'); return;
+    }
   }
 
   hideLoader();
@@ -1573,9 +1611,8 @@ async function saveAttendance() {
 // ══════════════════════════════════════════════════════
 function refreshViewFilters() {
   rebuildDropdowns();
-  const today8 = new Date(); today8.setDate(1);
   if (!document.getElementById('view-from').value)
-    document.getElementById('view-from').value = today8.toISOString().slice(0,10);
+    document.getElementById('view-from').value = monthStartKST();
   if (!document.getElementById('view-to').value)
     document.getElementById('view-to').value = today();
 }
@@ -1586,6 +1623,9 @@ function clearViewFilter() {
   document.getElementById('view-to').value = '';
   renderJournalView();
 }
+
+// 렌더 시점의 일지 목록 — onclick에는 인덱스만 넘기고 여기서 읽음
+let journalViewCache = [];
 
 async function renderJournalView() {
   const fac  = document.getElementById('view-facility')?.value || '';
@@ -1605,6 +1645,7 @@ async function renderJournalView() {
 
   const wrap = document.getElementById('journalTableWrap');
   if (!journals.length) {
+    journalViewCache = [];
     wrap.innerHTML = '<div class="empty-state" style="padding:40px"><div class="empty-icon">📋</div><h4>저장된 일지가 없습니다</h4></div>';
     return;
   }
@@ -1614,18 +1655,18 @@ async function renderJournalView() {
     <th>출석</th><th>결석</th><th>지각</th>
     <th>교육내용</th><th>특이사항</th>
   </tr></thead><tbody>`;
-  journals.forEach((j) => {
+  journalViewCache = journals;
+  journals.forEach((j, idx) => {
     const sm = j.status_map || {};
     const vals = Object.values(sm);
     const p=vals.filter(v=>v==='출석').length, ab=vals.filter(v=>v==='결석').length, la=vals.filter(v=>v==='지각').length;
-    const jEncoded = encodeURIComponent(JSON.stringify(j));
-    html += `<tr class="journal-row" onclick="openJournalPreview('${jEncoded}')" title="클릭하면 상세보기">
-      <td>${j.date}</td><td>${j.facility}</td><td>${j.time}</td>
+    html += `<tr class="journal-row" onclick="openJournalPreview(${idx})" title="클릭하면 상세보기">
+      <td>${escHtml(j.date)}</td><td>${escHtml(j.facility)}</td><td>${escHtml(j.time)}</td>
       <td><span class="badge badge-present">✓ ${p}</span></td>
       <td><span class="badge badge-absent">✗ ${ab}</span></td>
       <td><span class="badge badge-late">△ ${la}</span></td>
-      <td style="max-width:200px;word-break:break-all">${(j.content||'-').substring(0,40)}${(j.content||'').length>40?'…':''}</td>
-      <td style="max-width:150px;word-break:break-all">${(j.note||'-').substring(0,30)}${(j.note||'').length>30?'…':''}</td>
+      <td style="max-width:200px;word-break:break-all">${escHtml(String(j.content||'-').substring(0,40))}${String(j.content||'').length>40?'…':''}</td>
+      <td style="max-width:150px;word-break:break-all">${escHtml(String(j.note||'-').substring(0,30))}${String(j.note||'').length>30?'…':''}</td>
     </tr>`;
   });
   html += '</tbody></table>';
@@ -1674,10 +1715,9 @@ async function renderAdminPage() {
   await renderFacilityUserTabs();
   await renderOptionList('time');
   // 기간 기본값: 이번 달 1일 ~ 오늘
-  const t = new Date(); t.setDate(1);
   const fromEl = document.getElementById('admin-att-from');
   const toEl   = document.getElementById('admin-att-to');
-  if (fromEl && !fromEl.value) fromEl.value = t.toISOString().slice(0,10);
+  if (fromEl && !fromEl.value) fromEl.value = monthStartKST();
   if (toEl   && !toEl.value)   toEl.value   = today();
   // 필터 드롭다운 초기화
   await populateAdminAttFilters();
@@ -1689,7 +1729,7 @@ async function renderAdminPage() {
 async function populateAdminAttFilters() {
   const users = await getUserList();
   const userOptions = '<option value="">전체 기록자</option>' +
-    users.map(u => `<option value="${esc(u.username)}">${u.username}</option>`).join('');
+    users.map(u => `<option value="${escHtml(u.username)}">${escHtml(u.username)}</option>`).join('');
 
   // 시설 목록 조회
   let facs = [];
@@ -1698,12 +1738,12 @@ async function populateAdminAttFilters() {
       users.flatMap(u => localGet('demo_facilities_' + u.username, []))
     )];
   } else {
-    const { data } = await sb.from('app_options')
-      .select('value').eq('type', 'facility').order('value', { ascending: true });
+    const { data } = await sbSelectAll(() => sb.from('app_options')
+      .select('value').eq('type', 'facility').order('value', { ascending: true }));
     facs = [...new Set((data||[]).map(r => r.value))];
   }
   const facOptions = '<option value="">전체 시설</option>' +
-    facs.map(f => `<option value="${esc(f)}">${f}</option>`).join('');
+    facs.map(f => `<option value="${escHtml(f)}">${escHtml(f)}</option>`).join('');
 
   // 기간별 조회 카드 필터
   const o1 = document.getElementById('admin-att-owner');
@@ -1721,8 +1761,7 @@ async function populateAdminAttFilters() {
   const dailyFrom = document.getElementById('daily-from');
   const dailyTo   = document.getElementById('daily-to');
   if (dailyFrom && !dailyFrom.value) {
-    const t = new Date(); t.setDate(1);
-    dailyFrom.value = t.toISOString().slice(0,10);
+    dailyFrom.value = monthStartKST();
   }
   if (dailyTo && !dailyTo.value) dailyTo.value = today();
 }
@@ -1740,10 +1779,9 @@ function resetDailyFilter() {
   const f = document.getElementById('daily-facility');
   if (o) o.value = '';
   if (f) f.value = '';
-  const t = new Date(); t.setDate(1);
   const fromEl = document.getElementById('daily-from');
   const toEl   = document.getElementById('daily-to');
-  if (fromEl) fromEl.value = t.toISOString().slice(0,10);
+  if (fromEl) fromEl.value = monthStartKST();
   if (toEl)   toEl.value   = today();
   toast('일별 요약 필터가 초기화되었습니다');
 }
@@ -1763,11 +1801,11 @@ async function renderUserList() {
   let html = '<div class="table-wrap"><table class="user-table"><thead><tr><th>#</th><th>사용자명</th><th>코드</th><th>관리</th></tr></thead><tbody>';
   users.forEach((u,i) => {
     html += `<tr><td style="color:var(--text-muted)">${i+1}</td>
-      <td><strong>${u.username}</strong></td>
-      <td><span style="font-family:monospace;background:var(--bg);padding:2px 8px;border-radius:4px">${u.code}</span></td>
+      <td><strong>${escHtml(u.username)}</strong></td>
+      <td><span style="font-family:monospace;background:var(--bg);padding:2px 8px;border-radius:4px">${escHtml(u.code)}</span></td>
       <td>
-        <button class="btn btn-outline btn-sm" onclick="editUser('${u.id}','${esc(u.username)}','${esc(u.code)}')" style="margin-right:6px">✏️ 수정</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}')">삭제</button>
+        <button class="btn btn-outline btn-sm" onclick="editUser('${esc(u.id)}','${esc(u.username)}','${esc(u.code)}')" style="margin-right:6px">✏️ 수정</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteUser('${esc(u.id)}')">삭제</button>
       </td></tr>`;
   });
   html += '</tbody></table></div>';
@@ -1788,7 +1826,8 @@ async function addUser() {
   } else {
     const existing = await sbSelect('app_users', { username });
     if (existing.length) { hideLoader(); toast('이미 존재하는 사용자명입니다','error'); return; }
-    await sbInsert('app_users', { username, code });
+    const res = await sbInsert('app_users', { username, code });
+    if (!res) { hideLoader(); toast('❌ 사용자 추가 실패 — 다시 시도해주세요', 'error'); return; }
   }
   hideLoader();
   document.getElementById('newUsername').value = '';
@@ -1811,7 +1850,11 @@ async function editUser(id, curName, curCode) {
     if (idx >= 0) { users[idx].username = newName.trim(); users[idx].code = newCode.trim(); }
     localSet('demo_users', users);
   } else {
-    await sb.from('app_users').update({ username: newName.trim(), code: newCode.trim() }).eq('id', id);
+    const { error } = await sb.from('app_users').update({ username: newName.trim(), code: newCode.trim() }).eq('id', id);
+    if (error) {
+      console.error('update app_users', error);
+      hideLoader(); toast('❌ 사용자 수정 실패 — 다시 시도해주세요', 'error'); return;
+    }
   }
   hideLoader();
   await renderUserList();
@@ -1825,7 +1868,8 @@ async function deleteUser(id) {
       const users = localGet('demo_users',[]);
       localSet('demo_users', users.filter(u => String(u.id) !== String(id)));
     } else {
-      await sbDelete('app_users', id);
+      const ok = await sbDelete('app_users', id);
+      if (!ok) { hideLoader(); toast('❌ 사용자 삭제 실패 — 다시 시도해주세요', 'error'); return; }
     }
     hideLoader();
     await renderUserList();
@@ -1849,7 +1893,7 @@ async function renderFacilityUserTabs() {
 
   tabsEl.innerHTML = users.map(u =>
     `<button class="user-sel-tab${selectedFacilityUser === u.username ? ' active' : ''}"
-       onclick="selectFacilityUser('${esc(u.username)}')">${u.username}</button>`
+       onclick="selectFacilityUser('${esc(u.username)}')">${escHtml(u.username)}</button>`
   ).join('');
 
   // 이전에 선택된 사용자가 있으면 패널 유지
@@ -1885,7 +1929,7 @@ async function renderFacilityPanel(username) {
     return;
   }
   listEl.innerHTML = facilities.map(v =>
-    `<span class="option-tag">${v}
+    `<span class="option-tag">${escHtml(v)}
        <button class="del-btn" onclick="deleteFacilityForUser('${esc(username)}','${esc(v)}')" title="삭제">×</button>
      </span>`
   ).join('');
@@ -1919,7 +1963,8 @@ async function addFacilityForUser() {
       rebuildDropdowns();
     }
   } else {
-    await sbInsert('app_options', { type: 'facility', value, owner: selectedFacilityUser });
+    const res = await sbInsert('app_options', { type: 'facility', value, owner: selectedFacilityUser });
+    if (!res) { hideLoader(); toast('❌ 시설 배정 실패 — 다시 시도해주세요', 'error'); return; }
     // 현재 사용자라면 캐시 갱신
     if (selectedFacilityUser === currentUser.username) await loadOptions();
   }
@@ -1944,8 +1989,12 @@ async function deleteFacilityForUser(username, value) {
         }
       } else {
         // owner + type + value 조합으로 삭제
-        await sb.from('app_options').delete()
+        const { error } = await sb.from('app_options').delete()
           .eq('type', 'facility').eq('owner', username).eq('value', value);
+        if (error) {
+          console.error('delete app_options', error);
+          hideLoader(); toast('❌ 시설 삭제 실패 — 다시 시도해주세요', 'error'); return;
+        }
         if (username === currentUser.username) await loadOptions();
       }
       await renderFacilityPanel(username);
@@ -1964,7 +2013,7 @@ async function renderOptionList(type) {
     listEl.innerHTML = '<span style="font-size:12px;color:var(--text-muted)">항목이 없습니다.</span>'; return;
   }
   listEl.innerHTML = opts.map(v =>
-    `<span class="option-tag">${v}
+    `<span class="option-tag">${escHtml(v)}
       <button class="del-btn" onclick="deleteOption('time','${esc(v)}')" title="삭제">×</button>
     </span>`
   ).join('');
@@ -1982,7 +2031,8 @@ async function addOption(type) {
     cachedTimes.push(value);
     localSet('opt_times', cachedTimes);
   } else {
-    await sbInsert('app_options', { type: 'time', value, owner: null });
+    const res = await sbInsert('app_options', { type: 'time', value, owner: null });
+    if (!res) { hideLoader(); toast('❌ 항목 추가 실패 — 다시 시도해주세요', 'error'); return; }
   }
   document.getElementById(inputId).value = '';
   if (isDemo()) {
@@ -2003,7 +2053,11 @@ async function deleteOption(type, value) {
       cachedTimes = localGet('opt_times', []);
       rebuildDropdowns();
     } else {
-      await sb.from('app_options').delete().eq('type', 'time').eq('value', value);
+      const { error } = await sb.from('app_options').delete().eq('type', 'time').eq('value', value);
+      if (error) {
+        console.error('delete app_options', error);
+        hideLoader(); toast('❌ 항목 삭제 실패 — 다시 시도해주세요', 'error'); return;
+      }
       await loadOptions();
     }
     await renderOptionList('time');
@@ -2013,6 +2067,9 @@ async function deleteOption(type, value) {
 }
 
 // ── 기간별 출석 조회 (필터 포함) ──
+// 렌더 시점의 일지 목록 — 편집 버튼에는 인덱스만 넘기고 여기서 읽음
+let adminAttCache = [];
+
 async function renderAdminAttTable() {
   const from     = document.getElementById('admin-att-from')?.value || '';
   const to       = document.getElementById('admin-att-to')?.value   || '';
@@ -2029,11 +2086,12 @@ async function renderAdminAttTable() {
   if (isDemo()) {
     recs = localGet('demo_journals',[]).filter(j => j.date >= from && j.date <= to);
   } else {
-    let q = sb.from('journals').select('*').gte('date', from).lte('date', to);
-    if (ownerF)    q = q.eq('owner',    ownerF);
-    if (facilityF) q = q.eq('facility', facilityF);
-    q = q.order('date', { ascending: true });
-    const { data } = await q;
+    const { data } = await sbSelectAll(() => {
+      let q = sb.from('journals').select('*').gte('date', from).lte('date', to);
+      if (ownerF)    q = q.eq('owner',    ownerF);
+      if (facilityF) q = q.eq('facility', facilityF);
+      return q.order('date', { ascending: true }).order('id', { ascending: true });
+    });
     recs = data || [];
   }
 
@@ -2045,15 +2103,16 @@ async function renderAdminAttTable() {
 
   hideLoader();
 
-  // 필터 적용 상태 표시
+  // 필터 적용 상태 표시 (HTML 이스케이프 적용)
   const filterDesc = [
-    ownerF    ? `기록자: ${ownerF}`    : '',
-    facilityF ? `시설: ${facilityF}`  : '',
+    ownerF    ? `기록자: ${escHtml(ownerF)}`    : '',
+    facilityF ? `시설: ${escHtml(facilityF)}`  : '',
   ].filter(Boolean).join(' · ');
 
   if (!recs.length) {
+    adminAttCache = [];
     wrap.innerHTML = `<div class="empty-state" style="padding:20px">
-      <p>${from} ~ ${to}${filterDesc ? ' · '+filterDesc : ''} 데이터 없음</p>
+      <p>${escHtml(from)} ~ ${escHtml(to)}${filterDesc ? ' · '+filterDesc : ''} 데이터 없음</p>
     </div>`;
     return;
   }
@@ -2069,19 +2128,19 @@ async function renderAdminAttTable() {
     <th>날짜</th><th>기록자</th><th>교육시설</th><th>교육시간</th>
     <th>출석</th><th>결석</th><th>지각</th><th>전체</th><th>편집</th>
   </tr></thead><tbody>`;
-  recs.forEach(r => {
+  adminAttCache = recs;
+  recs.forEach((r, idx) => {
     const vals = Object.values(r.status_map||{}).filter(v=>v);
     const p=vals.filter(v=>v==='출석').length, ab=vals.filter(v=>v==='결석').length, la=vals.filter(v=>v==='지각').length;
-    const rEncoded = encodeURIComponent(JSON.stringify(r));
     html += `<tr>
-      <td>${r.date}</td>
-      <td><strong>${r.owner||'-'}</strong></td>
-      <td>${r.facility}</td><td>${r.time}</td>
+      <td>${escHtml(r.date)}</td>
+      <td><strong>${escHtml(r.owner||'-')}</strong></td>
+      <td>${escHtml(r.facility)}</td><td>${escHtml(r.time)}</td>
       <td><span class="badge badge-present">✓ ${p}</span></td>
       <td><span class="badge badge-absent">✗ ${ab}</span></td>
       <td><span class="badge badge-late">△ ${la}</span></td>
       <td><strong>${p+ab+la}</strong></td>
-      <td><button class="btn btn-outline btn-sm" onclick="openJournalEdit('${rEncoded}')">✏️ 편집</button></td>
+      <td><button class="btn btn-outline btn-sm" onclick="openJournalEdit(${idx})">✏️ 편집</button></td>
     </tr>`;
   });
   html += '</tbody></table>';
@@ -2102,11 +2161,12 @@ async function adminExportAttendanceRange() {
     if (ownerF)    recs = recs.filter(j => j.owner    === ownerF);
     if (facilityF) recs = recs.filter(j => j.facility === facilityF);
   } else {
-    let q = sb.from('journals').select('*').gte('date', from).lte('date', to);
-    if (ownerF)    q = q.eq('owner',    ownerF);
-    if (facilityF) q = q.eq('facility', facilityF);
-    q = q.order('date', { ascending: true });
-    const { data } = await q;
+    const { data } = await sbSelectAll(() => {
+      let q = sb.from('journals').select('*').gte('date', from).lte('date', to);
+      if (ownerF)    q = q.eq('owner',    ownerF);
+      if (facilityF) q = q.eq('facility', facilityF);
+      return q.order('date', { ascending: true }).order('id', { ascending: true });
+    });
     recs = data || [];
   }
   hideLoader();
@@ -2141,18 +2201,19 @@ async function adminRenderDailySummary() {
     if (ownerF)    recs = recs.filter(j => j.owner    === ownerF);
     if (facilityF) recs = recs.filter(j => j.facility === facilityF);
   } else {
-    let q = sb.from('journals').select('*').gte('date', from).lte('date', to);
-    if (ownerF)    q = q.eq('owner',    ownerF);
-    if (facilityF) q = q.eq('facility', facilityF);
-    q = q.order('date', { ascending: true }).order('owner', { ascending: true });
-    const { data } = await q;
+    const { data } = await sbSelectAll(() => {
+      let q = sb.from('journals').select('*').gte('date', from).lte('date', to);
+      if (ownerF)    q = q.eq('owner',    ownerF);
+      if (facilityF) q = q.eq('facility', facilityF);
+      return q.order('date', { ascending: true }).order('owner', { ascending: true }).order('id', { ascending: true });
+    });
     recs = data || [];
   }
   hideLoader();
 
   const wrap = document.getElementById('admin-daily-wrap');
   if (!recs.length) {
-    wrap.innerHTML = `<div class="empty-state" style="padding:20px"><p>${from} ~ ${to}${ownerF?' · '+ownerF:''}${facilityF?' · '+facilityF:''} 데이터 없음</p></div>`;
+    wrap.innerHTML = `<div class="empty-state" style="padding:20px"><p>${escHtml(from)} ~ ${escHtml(to)}${ownerF?' · '+escHtml(ownerF):''}${facilityF?' · '+escHtml(facilityF):''} 데이터 없음</p></div>`;
     dailySummaryCache = [];
     return;
   }
@@ -2169,10 +2230,10 @@ async function adminRenderDailySummary() {
   const totalAb = recs.reduce((s,r)=>s+Object.values(r.status_map||{}).filter(v=>v==='결석').length,0);
   const totalLa = recs.reduce((s,r)=>s+Object.values(r.status_map||{}).filter(v=>v==='지각').length,0);
 
-  // 필터 배지
+  // 필터 배지 (HTML 이스케이프 적용)
   const filterDesc = [
-    ownerF    ? `기록자: ${ownerF}`   : '',
-    facilityF ? `시설: ${facilityF}` : '',
+    ownerF    ? `기록자: ${escHtml(ownerF)}`   : '',
+    facilityF ? `시설: ${escHtml(facilityF)}` : '',
   ].filter(Boolean).join(' · ');
 
   let html = '';
@@ -2222,8 +2283,8 @@ async function adminRenderDailySummary() {
       const vals = Object.values(r.status_map||{}).filter(v=>v);
       const p=vals.filter(v=>v==='출석').length, ab=vals.filter(v=>v==='결석').length, la=vals.filter(v=>v==='지각').length;
       html += `<tr>
-        <td>${i===0?`<strong>${date}</strong>`:''}</td>
-        <td>${r.owner||'-'}</td><td>${r.facility}</td><td>${r.time}</td>
+        <td>${i===0?`<strong>${escHtml(date)}</strong>`:''}</td>
+        <td>${escHtml(r.owner||'-')}</td><td>${escHtml(r.facility)}</td><td>${escHtml(r.time)}</td>
         <td><span class="badge badge-present">✓ ${p}</span></td>
         <td><span class="badge badge-absent">✗ ${ab}</span></td>
         <td><span class="badge badge-late">△ ${la}</span></td>
@@ -2234,7 +2295,7 @@ async function adminRenderDailySummary() {
 
     if (dayRecs.length > 1) {
       html += `<tr style="background:var(--primary-light)">
-        <td colspan="4" style="text-align:right;color:var(--primary);font-size:12px;font-weight:700">📌 ${date} 소계</td>
+        <td colspan="4" style="text-align:right;color:var(--primary);font-size:12px;font-weight:700">📌 ${escHtml(date)} 소계</td>
         <td><span class="badge badge-present">✓ ${dayP}</span></td>
         <td><span class="badge badge-absent">✗ ${dayAb}</span></td>
         <td><span class="badge badge-late">△ ${dayLa}</span></td>
@@ -2259,144 +2320,6 @@ async function adminExportDailySummary() {
   xlsxDownload(rows, '일별요약', `일별요약_${from}_${to}.xlsx`);
 }
 
-async function adminRenderDailySummary2() {
-  const from     = document.getElementById('daily-from')?.value     || '';
-  const to       = document.getElementById('daily-to')?.value       || '';
-  const ownerF   = document.getElementById('daily-owner')?.value    || '';
-  const facilityF= document.getElementById('daily-facility')?.value || '';
-  if (!from || !to) { toast('시작일과 종료일을 선택하세요', 'error'); return; }
-  loader('일별 요약 생성 중...');
-  let recs = [];
-  if (isDemo()) {
-    recs = localGet('demo_journals',[]).filter(j => j.date >= from && j.date <= to);
-    if (ownerF)    recs = recs.filter(j => j.owner    === ownerF);
-    if (facilityF) recs = recs.filter(j => j.facility === facilityF);
-  } else {
-    let q = sb.from('journals').select('*').gte('date', from).lte('date', to);
-    if (ownerF)    q = q.eq('owner',    ownerF);
-    if (facilityF) q = q.eq('facility', facilityF);
-    q = q.order('date', { ascending: true }).order('owner', { ascending: true });
-    const { data } = await q;
-    recs = data || [];
-  }
-  hideLoader();
-
-  const wrap = document.getElementById('admin-daily-wrap');
-  if (!recs.length) {
-    wrap.innerHTML = `<div class="empty-state" style="padding:20px"><p>해당 기간에 데이터가 없습니다</p></div>`;
-    dailySummaryCache = [];
-    return;
-  }
-
-  // 날짜별로 그룹핑
-  const byDate = {};
-  recs.forEach(r => {
-    if (!byDate[r.date]) byDate[r.date] = [];
-    byDate[r.date].push(r);
-  });
-
-  // 전체 통계 집계
-  const totalP  = recs.reduce((s,r) => s + Object.values(r.status_map||{}).filter(v=>v==='출석').length, 0);
-  const totalAb = recs.reduce((s,r) => s + Object.values(r.status_map||{}).filter(v=>v==='결석').length, 0);
-  const totalLa = recs.reduce((s,r) => s + Object.values(r.status_map||{}).filter(v=>v==='지각').length, 0);
-
-  // 요약 카드 (총계)
-  let html = `
-  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
-    <div style="flex:1;min-width:100px;background:var(--primary-light);border:1px solid var(--primary);border-radius:10px;padding:12px;text-align:center">
-      <div style="font-size:22px;font-weight:700;color:var(--primary)">${Object.keys(byDate).length}</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:2px">교육 일수</div>
-    </div>
-    <div style="flex:1;min-width:100px;background:var(--accent-light);border:1px solid var(--accent);border-radius:10px;padding:12px;text-align:center">
-      <div style="font-size:22px;font-weight:700;color:var(--accent)">${totalP}</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:2px">총 출석</div>
-    </div>
-    <div style="flex:1;min-width:100px;background:var(--danger-light);border:1px solid var(--danger);border-radius:10px;padding:12px;text-align:center">
-      <div style="font-size:22px;font-weight:700;color:var(--danger)">${totalAb}</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:2px">총 결석</div>
-    </div>
-    <div style="flex:1;min-width:100px;background:var(--warn-light);border:1px solid var(--warn);border-radius:10px;padding:12px;text-align:center">
-      <div style="font-size:22px;font-weight:700;color:var(--warn)">${totalLa}</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:2px">총 지각</div>
-    </div>
-  </div>`;
-
-  // 날짜별 상세 표
-  html += `<div class="table-wrap"><table>
-    <thead><tr>
-      <th>날짜</th><th>기록자</th><th>교육시설</th><th>교육시간</th>
-      <th>출석</th><th>결석</th><th>지각</th><th>전체</th>
-    </tr></thead><tbody>`;
-
-  const sortedDates = Object.keys(byDate).sort();
-  dailySummaryCache = [];
-
-  sortedDates.forEach(date => {
-    const dayRecs = byDate[date];
-    // 날짜별 소계
-    const dayP  = dayRecs.reduce((s,r)=>s+Object.values(r.status_map||{}).filter(v=>v==='출석').length,0);
-    const dayAb = dayRecs.reduce((s,r)=>s+Object.values(r.status_map||{}).filter(v=>v==='결석').length,0);
-    const dayLa = dayRecs.reduce((s,r)=>s+Object.values(r.status_map||{}).filter(v=>v==='지각').length,0);
-
-    if (dayRecs.length === 1) {
-      // 해당 날짜에 1건만 있으면 단일 행
-      const r = dayRecs[0];
-      const vals = Object.values(r.status_map||{}).filter(v=>v);
-      const p=vals.filter(v=>v==='출석').length, ab=vals.filter(v=>v==='결석').length, la=vals.filter(v=>v==='지각').length;
-      html += `<tr>
-        <td><strong>${date}</strong></td>
-        <td>${r.owner||'-'}</td><td>${r.facility}</td><td>${r.time}</td>
-        <td><span class="badge badge-present">✓ ${p}</span></td>
-        <td><span class="badge badge-absent">✗ ${ab}</span></td>
-        <td><span class="badge badge-late">△ ${la}</span></td>
-        <td><strong>${p+ab+la}</strong></td>
-      </tr>`;
-      dailySummaryCache.push({ date, owner: r.owner, facility: r.facility, time: r.time, present: p, absent: ab, late: la, total: p+ab+la });
-    } else {
-      // 해당 날짜에 여러 건 → 하위 행으로 펼침 + 소계 행
-      dayRecs.forEach((r, i) => {
-        const vals = Object.values(r.status_map||{}).filter(v=>v);
-        const p=vals.filter(v=>v==='출석').length, ab=vals.filter(v=>v==='결석').length, la=vals.filter(v=>v==='지각').length;
-        html += `<tr style="${i===0?'':'border-top:none'}">
-          <td style="color:${i===0?'var(--text)':'var(--text-muted)'}">
-            ${i===0?`<strong>${date}</strong>`:''}</td>
-          <td>${r.owner||'-'}</td><td>${r.facility}</td><td>${r.time}</td>
-          <td><span class="badge badge-present">✓ ${p}</span></td>
-          <td><span class="badge badge-absent">✗ ${ab}</span></td>
-          <td><span class="badge badge-late">△ ${la}</span></td>
-          <td><strong>${p+ab+la}</strong></td>
-        </tr>`;
-        dailySummaryCache.push({ date, owner: r.owner, facility: r.facility, time: r.time, present: p, absent: ab, late: la, total: p+ab+la });
-      });
-      // 소계 행
-      html += `<tr style="background:var(--primary-light);font-weight:700">
-        <td colspan="4" style="text-align:right;color:var(--primary);font-size:12px">📌 ${date} 소계</td>
-        <td><span class="badge badge-present">✓ ${dayP}</span></td>
-        <td><span class="badge badge-absent">✗ ${dayAb}</span></td>
-        <td><span class="badge badge-late">△ ${dayLa}</span></td>
-        <td><strong style="color:var(--primary)">${dayP+dayAb+dayLa}</strong></td>
-      </tr>`;
-    }
-  });
-
-  html += `</tbody></table></div>`;
-  wrap.innerHTML = html;
-  toast(`✅ ${sortedDates.length}일 요약 생성 완료`, 'success');
-}
-
-async function adminExportDailySummaryAtt() {
-  if (!dailySummaryCache.length) {
-    toast('먼저 일별 요약 생성을 눌러주세요', 'error'); return;
-  }
-  const from = document.getElementById('admin-att-from')?.value || '';
-  const to   = document.getElementById('admin-att-to')?.value   || '';
-  const rows = [['날짜','기록자','교육시설','교육시간','출석','결석','지각','전체']];
-  dailySummaryCache.forEach(r => {
-    rows.push([r.date, r.owner||'', r.facility, r.time, r.present, r.absent, r.late, r.total]);
-  });
-  xlsxDownload(rows, '일별요약', `일별요약_${from}_${to}.xlsx`);
-}
-
 // ── 전체 학생 현황 [NEW] ──
 let allStudentsCache = [];
 
@@ -2405,7 +2328,8 @@ async function adminRenderStudentStats() {
   if (isDemo()) {
     allStudentsCache = localGet('demo_students', []);
   } else {
-    const { data } = await sb.from('students').select('*').order('facility', { ascending: true });
+    const { data } = await sbSelectAll(() =>
+      sb.from('students').select('*').order('facility', { ascending: true }).order('id', { ascending: true }));
     allStudentsCache = data || [];
   }
   hideLoader();
@@ -2429,14 +2353,14 @@ async function adminRenderStudentStats() {
     const ci = i % colors.length;
     return `<div style="background:${bgColors[ci]};border:1.5px solid ${colors[ci]};border-radius:10px;padding:14px 18px;min-width:120px;text-align:center">
       <div style="font-size:22px;font-weight:700;color:${colors[ci]}">${facMap[fac]}</div>
-      <div style="font-size:12px;color:var(--text-sub);margin-top:3px;font-weight:600">${fac}</div>
+      <div style="font-size:12px;color:var(--text-sub);margin-top:3px;font-weight:600">${escHtml(fac)}</div>
       <div style="font-size:11px;color:var(--text-muted)">명</div>
     </div>`;
   }).join('');
 
   // 시설 필터 드롭다운 갱신
   const filterEl = document.getElementById('adminStudentFilter');
-  filterEl.innerHTML = '<option value="">전체</option>' + facs.map(f => `<option value="${esc(f)}">${f}</option>`).join('');
+  filterEl.innerHTML = '<option value="">전체</option>' + facs.map(f => `<option value="${escHtml(f)}">${escHtml(f)}</option>`).join('');
 
   adminFilterStudentTable();
 }
@@ -2458,11 +2382,11 @@ function adminFilterStudentTable() {
   list.forEach((s, i) => {
     html += `<tr>
       <td style="color:var(--text-muted)">${i+1}</td>
-      <td><strong>${s.owner||s.created_by||'-'}</strong></td>
-      <td>${s.facility}</td><td>${s.time}</td>
-      <td><strong>${s.name}</strong></td>
-      <td>${s.birth?s.birth.replace(/-/g,'.'):'—'}</td>
-      <td>${s.gender||'—'}</td>
+      <td><strong>${escHtml(s.owner||s.created_by||'-')}</strong></td>
+      <td>${escHtml(s.facility)}</td><td>${escHtml(s.time)}</td>
+      <td><strong>${escHtml(s.name)}</strong></td>
+      <td>${s.birth?escHtml(String(s.birth).replace(/-/g,'.')):'—'}</td>
+      <td>${escHtml(s.gender||'—')}</td>
     </tr>`;
   });
   html += '</tbody></table>';
@@ -2475,7 +2399,8 @@ async function adminExportAllStudents() {
     loader('데이터 로딩 중...');
     if (isDemo()) allStudentsCache = localGet('demo_students', []);
     else {
-      const { data } = await sb.from('students').select('*').order('facility', { ascending: true });
+      const { data } = await sbSelectAll(() =>
+        sb.from('students').select('*').order('facility', { ascending: true }).order('id', { ascending: true }));
       allStudentsCache = data || [];
     }
     hideLoader();
@@ -2501,11 +2426,11 @@ async function editStudent(id) {
 
   // 드롭다운 세팅
   const fEl = document.getElementById('editStudentFacility');
-  fEl.innerHTML = '<option value="">-- 선택 --</option>' + cachedFacilities.map(f => `<option value="${esc(f)}">${f}</option>`).join('');
+  fEl.innerHTML = '<option value="">-- 선택 --</option>' + cachedFacilities.map(f => `<option value="${escHtml(f)}">${escHtml(f)}</option>`).join('');
   fEl.value = s.facility;
 
   const tEl = document.getElementById('editStudentTime');
-  tEl.innerHTML = '<option value="">-- 선택 --</option>' + cachedTimes.map(t => `<option value="${esc(t)}">${t}</option>`).join('');
+  tEl.innerHTML = '<option value="">-- 선택 --</option>' + cachedTimes.map(t => `<option value="${escHtml(t)}">${escHtml(t)}</option>`).join('');
   tEl.value = s.time;
 
   // 성별 라디오
@@ -2532,7 +2457,11 @@ async function saveStudentEdit() {
     if (idx >= 0) Object.assign(students[idx], { facility, time, name, birth: birth||null, gender });
     localSet('demo_students', students);
   } else {
-    await sb.from('students').update({ facility, time, name, birth: birth||null, gender }).eq('id', id);
+    const { error } = await sb.from('students').update({ facility, time, name, birth: birth||null, gender }).eq('id', id);
+    if (error) {
+      console.error('update students', error);
+      hideLoader(); toast('❌ 학생 정보 수정 실패 — 다시 시도해주세요', 'error'); return;
+    }
   }
   hideLoader();
   closeStudentEdit();
@@ -2580,7 +2509,11 @@ async function exportJournalExcel() {
 
   let journals = [];
   if (isDemo()) journals = (localGet('demo_journals',[])).filter(j=>j.owner===currentUser.username);
-  else { const {data} = await sb.from('journals').select('*').eq('owner',currentUser.username); journals = data||[]; }
+  else {
+    const {data} = await sbSelectAll(() =>
+      sb.from('journals').select('*').eq('owner',currentUser.username).order('id', { ascending: true }));
+    journals = data||[];
+  }
   if (fac)  journals = journals.filter(j=>j.facility===fac);
   if (from) journals = journals.filter(j=>j.date>=from);
   if (to)   journals = journals.filter(j=>j.date<=to);
@@ -2599,7 +2532,10 @@ async function adminExportAllJournals() {
   loader('데이터 로딩 중...');
   let journals = [];
   if (isDemo()) journals = localGet('demo_journals',[]);
-  else { const {data} = await sb.from('journals').select('*'); journals = data||[]; }
+  else {
+    const {data} = await sbSelectAll(() => sb.from('journals').select('*').order('id', { ascending: true }));
+    journals = data||[];
+  }
   journals.sort((a,b)=>b.date.localeCompare(a.date));
   hideLoader();
   if (!journals.length) { toast('데이터가 없습니다','error'); return; }
@@ -2615,7 +2551,10 @@ async function adminExportAllAttendance() {
   loader('데이터 로딩 중...');
   let journals = [];
   if (isDemo()) journals = localGet('demo_journals',[]);
-  else { const {data} = await sb.from('journals').select('*'); journals = data||[]; }
+  else {
+    const {data} = await sbSelectAll(() => sb.from('journals').select('*').order('id', { ascending: true }));
+    journals = data||[];
+  }
   hideLoader();
   if (!journals.length) { toast('데이터가 없습니다','error'); return; }
 
@@ -2889,10 +2828,10 @@ function showUserPreview(rows) {
       : `<span class="row-status" style="color:var(--accent)">✓ 정상</span>`;
     html += `<tr class="${cls}">
       <td style="color:var(--text-muted)">${r.rowNum}</td>
-      <td>${r.date||'-'}</td><td>${r.facility||'-'}</td><td>${r.time||'-'}</td>
+      <td>${escHtml(r.date||'-')}</td><td>${escHtml(r.facility||'-')}</td><td>${escHtml(r.time||'-')}</td>
       <td>${r.present}</td><td>${r.absent}</td><td>${r.late}</td>
-      <td style="max-width:160px;word-break:break-all">${(r.content||'').substring(0,40)}${r.content?.length>40?'…':''}</td>
-      <td style="max-width:120px;word-break:break-all">${(r.note||'').substring(0,30)}${r.note?.length>30?'…':''}</td>
+      <td style="max-width:160px;word-break:break-all">${escHtml((r.content||'').substring(0,40))}${r.content?.length>40?'…':''}</td>
+      <td style="max-width:120px;word-break:break-all">${escHtml((r.note||'').substring(0,30))}${r.note?.length>30?'…':''}</td>
       <td>${statusBadge}</td>
     </tr>`;
   });
@@ -2942,11 +2881,11 @@ function showAdminPreview(rows) {
       : `<span class="row-status" style="color:var(--accent)">✓ 정상</span>`;
     html += `<tr class="${cls}">
       <td style="color:var(--text-muted)">${r.rowNum}</td>
-      <td><strong>${r.owner||'-'}</strong></td>
-      <td>${r.date||'-'}</td><td>${r.facility||'-'}</td><td>${r.time||'-'}</td>
+      <td><strong>${escHtml(r.owner||'-')}</strong></td>
+      <td>${escHtml(r.date||'-')}</td><td>${escHtml(r.facility||'-')}</td><td>${escHtml(r.time||'-')}</td>
       <td>${r.present}</td><td>${r.absent}</td><td>${r.late}</td>
-      <td style="max-width:130px;word-break:break-all">${(r.content||'').substring(0,30)}${r.content?.length>30?'…':''}</td>
-      <td style="max-width:100px;word-break:break-all">${(r.note||'').substring(0,20)}${r.note?.length>20?'…':''}</td>
+      <td style="max-width:130px;word-break:break-all">${escHtml((r.content||'').substring(0,30))}${r.content?.length>30?'…':''}</td>
+      <td style="max-width:100px;word-break:break-all">${escHtml((r.note||'').substring(0,20))}${r.note?.length>20?'…':''}</td>
       <td>${statusBadge}</td>
     </tr>`;
   });
@@ -2968,7 +2907,7 @@ async function confirmUpload() {
 
   loader(`저장 중... (0 / ${okRows.length})`);
   const now = nowKSTString();
-  let saved = 0, updated = 0;
+  let okCount = 0, failCount = 0, updated = 0, done = 0;
 
   for (const r of okRows) {
     // ★ 핵심 수정: present/absent/late 숫자를 status_map으로 변환
@@ -2993,23 +2932,29 @@ async function confirmUpload() {
         j.facility === r.facility && j.time === r.time && j.date === r.date
       );
       if (idx >= 0) { jrns[idx] = { ...jrns[idx], ...jRec }; updated++; }
-      else           { jrns.push({ ...jRec, id: Date.now() + saved }); }
+      else           { jrns.push({ ...jRec, id: Date.now() + done }); }
       localSet('demo_journals', jrns);
+      okCount++;
     } else {
       const { error } = await sb.from('journals').upsert(jRec, {
         onConflict: 'facility,time,date,owner'
       });
-      if (error) { console.error('upsert error', error); }
-      else updated++;
+      if (error) { console.error('upsert error', r.rowNum, error); failCount++; }
+      else okCount++;
     }
-    saved++;
-    loader(`저장 중... (${saved} / ${okRows.length})`);
+    done++;
+    loader(`저장 중... (${done} / ${okRows.length})`);
   }
 
   hideLoader();
-  cancelUpload();
   await renderJournalView();
-  toast(`✅ ${saved}행 저장 완료${updated ? ` (${updated}건 갱신)` : ''}`, 'success');
+  if (failCount) {
+    // 실패 행이 있으면 미리보기를 유지해 다시 시도할 수 있게 함 (upsert라 중복 저장 없음)
+    toast(`⚠️ ${okCount}행 저장 성공, ${failCount}행 저장 실패 — 다시 시도해주세요`, 'error');
+    return;
+  }
+  cancelUpload();
+  toast(`✅ ${okCount}행 저장 완료${updated ? ` (${updated}건 갱신)` : ''}`, 'success');
 }
 
 function cancelUpload() {
@@ -3024,7 +2969,7 @@ async function confirmAdminUpload() {
 
   loader(`저장 중... (0 / ${okRows.length})`);
   const now = nowKSTString();
-  let saved = 0;
+  let okCount = 0, failCount = 0, done = 0;
 
   for (const r of okRows) {
     // ★ 핵심 수정: present/absent/late 숫자를 status_map으로 변환
@@ -3048,20 +2993,28 @@ async function confirmAdminUpload() {
         j.facility === r.facility && j.time === r.time && j.date === r.date
       );
       if (idx >= 0) jrns[idx] = { ...jrns[idx], ...jRec };
-      else           jrns.push({ ...jRec, id: Date.now() + saved });
+      else           jrns.push({ ...jRec, id: Date.now() + done });
       localSet('demo_journals', jrns);
+      okCount++;
     } else {
-      await sb.from('journals').upsert(jRec, {
+      const { error } = await sb.from('journals').upsert(jRec, {
         onConflict: 'facility,time,date,owner'
       });
+      if (error) { console.error('upsert error', r.rowNum, error); failCount++; }
+      else okCount++;
     }
-    saved++;
-    loader(`저장 중... (${saved} / ${okRows.length})`);
+    done++;
+    loader(`저장 중... (${done} / ${okRows.length})`);
   }
 
   hideLoader();
+  if (failCount) {
+    // 실패 행이 있으면 미리보기를 유지해 다시 시도할 수 있게 함 (upsert라 중복 저장 없음)
+    toast(`⚠️ ${okCount}행 저장 성공, ${failCount}행 저장 실패 — 다시 시도해주세요`, 'error');
+    return;
+  }
   cancelAdminUpload();
-  toast(`✅ ${saved}행 저장 완료`, 'success');
+  toast(`✅ ${okCount}행 저장 완료`, 'success');
 }
 
 function cancelAdminUpload() {
@@ -3077,7 +3030,7 @@ async function initAdminNewJournalForm() {
   const ownerEl = document.getElementById('anew-owner');
   if (!ownerEl) return;
   ownerEl.innerHTML = '<option value="">-- 선택 --</option>' +
-    users.map(u => `<option value="${esc(u.username)}">${u.username}</option>`).join('');
+    users.map(u => `<option value="${escHtml(u.username)}">${escHtml(u.username)}</option>`).join('');
 
   // 날짜 기본값 = 오늘(KST)
   const dateEl = document.getElementById('anew-date');
@@ -3114,14 +3067,14 @@ async function anewLoadFacilities(username) {
 
   const facs = await getFacilitiesForUser(username);
   facEl.innerHTML = '<option value="">-- 선택 --</option>' +
-    facs.map(f => `<option value="${esc(f)}">${f}</option>`).join('');
+    facs.map(f => `<option value="${escHtml(f)}">${escHtml(f)}</option>`).join('');
 }
 
 function anewLoadTimes() {
   const timeEl = document.getElementById('anew-time');
   if (!timeEl) return;
   timeEl.innerHTML = '<option value="">-- 선택 --</option>' +
-    cachedTimes.map(t => `<option value="${esc(t)}">${t}</option>`).join('');
+    cachedTimes.map(t => `<option value="${escHtml(t)}">${escHtml(t)}</option>`).join('');
 }
 
 let anewStudentMap = {}; // studentId → { name, status }
@@ -3180,12 +3133,12 @@ function anewRenderStudentList() {
     const status = info.status;
     const cls    = status === '출석' ? 'present' : status === '결석' ? 'absent' : status === '지각' ? 'late' : '';
     const rowCls = cls ? `jedit-person-row ${cls}` : 'jedit-person-row';
-    return `<div class="${rowCls}" id="anew-row-${id}">
+    return `<div class="${rowCls}" id="anew-row-${escHtml(id)}">
       <span style="font-size:16px">${status==='출석'?'✅':status==='결석'?'❌':status==='지각'?'⚠️':'⬜'}</span>
-      <span class="jedit-person-name">${info.name}${info.gender?' <span style="font-size:11px;opacity:.7">('+info.gender+')</span>':''}</span>
-      <button class="jedit-status-btn ${status==='출석'?'active-present':''}" onclick="anewSetStatus('${id}','출석')">출석</button>
-      <button class="jedit-status-btn ${status==='결석'?'active-absent':''}"  onclick="anewSetStatus('${id}','결석')">결석</button>
-      <button class="jedit-status-btn ${status==='지각'?'active-late':''}"   onclick="anewSetStatus('${id}','지각')">지각</button>
+      <span class="jedit-person-name">${escHtml(info.name)}${info.gender?' <span style="font-size:11px;opacity:.7">('+escHtml(info.gender)+')</span>':''}</span>
+      <button class="jedit-status-btn ${status==='출석'?'active-present':''}" onclick="anewSetStatus('${esc(id)}','출석')">출석</button>
+      <button class="jedit-status-btn ${status==='결석'?'active-absent':''}"  onclick="anewSetStatus('${esc(id)}','결석')">결석</button>
+      <button class="jedit-status-btn ${status==='지각'?'active-late':''}"   onclick="anewSetStatus('${esc(id)}','지각')">지각</button>
     </div>`;
   }).join('');
   anewUpdateCounts();
@@ -3268,19 +3221,33 @@ async function adminCreateJournal() {
     jrns.push({ ...payload, id: Date.now() });
     localSet('demo_journals', jrns);
   } else {
-    const { data: existing } = await sb.from('journals').select('id')
+    const { data: existing, error: selErr } = await sb.from('journals').select('id')
       .eq('owner', owner).eq('facility', facility).eq('time', time).eq('date', date);
+    if (selErr) {
+      console.error('select journals', selErr);
+      hideLoader(); toast('❌ 기존 일지 확인 실패 — 다시 시도해주세요', 'error'); return;
+    }
     if (existing && existing.length > 0) {
       hideLoader();
       showConfirm('일지 덮어쓰기',
         `${date} · ${owner} · ${facility} · ${time} 일지가 이미 존재합니다. 덮어쓰시겠습니까?`,
         async () => {
           loader('업데이트 중...');
-          await sb.from('journals').upsert(payload, { onConflict: 'facility,time,date,owner' });
-          await sb.from('attendance').upsert(
+          const { error: jErr } = await sb.from('journals').upsert(payload, { onConflict: 'facility,time,date,owner' });
+          if (jErr) {
+            console.error('journals upsert', jErr);
+            hideLoader(); toast('❌ 일지 업데이트 실패 — 다시 시도해주세요', 'error'); return;
+          }
+          const { error: aErr } = await sb.from('attendance').upsert(
             { owner, facility, time, date, status_map, saved_at: now },
             { onConflict: 'facility,time,date,owner' }
           );
+          if (aErr) {
+            console.error('attendance upsert', aErr);
+            hideLoader(); toast('❌ 일지는 저장되었으나 출석 데이터 저장 실패 — 다시 시도해주세요', 'error');
+            await renderAdminAttTable();
+            return;
+          }
           hideLoader();
           anewClearForm();
           await renderAdminAttTable();
@@ -3288,12 +3255,22 @@ async function adminCreateJournal() {
         });
       return;
     }
-    await sb.from('journals').insert(payload);
+    const { error: insErr } = await sb.from('journals').insert(payload);
+    if (insErr) {
+      console.error('journals insert', insErr);
+      hideLoader(); toast('❌ 일지 저장 실패 — 다시 시도해주세요', 'error'); return;
+    }
     if (Object.keys(status_map).length > 0) {
-      await sb.from('attendance').upsert(
+      const { error: aErr } = await sb.from('attendance').upsert(
         { owner, facility, time, date, status_map, saved_at: now },
         { onConflict: 'facility,time,date,owner' }
       );
+      if (aErr) {
+        console.error('attendance upsert', aErr);
+        hideLoader(); toast('❌ 일지는 저장되었으나 출석 데이터 저장 실패 — 다시 시도해주세요', 'error');
+        await renderAdminAttTable();
+        return;
+      }
     }
   }
 
@@ -3326,8 +3303,11 @@ let jeditStatusMap = {};      // 실시간 편집 중인 status_map (key→statu
 let jeditNameMap = {};        // key→표시이름 매핑 (학생등록 이름 or 직접입력)
 
 // 모달 열기
-async function openJournalEdit(encoded) {
-  jeditJournal   = JSON.parse(decodeURIComponent(encoded));
+// idx: renderAdminAttTable 렌더 시 채운 adminAttCache의 인덱스
+async function openJournalEdit(idx) {
+  const src = adminAttCache[idx];
+  if (!src) { toast('일지 정보를 찾을 수 없습니다 — 다시 조회해주세요', 'error'); return; }
+  jeditJournal   = JSON.parse(JSON.stringify(src)); // 편집용 복사본
   jeditStatusMap = { ...(jeditJournal.status_map || {}) };
   jeditNameMap   = {};
 
@@ -3335,7 +3315,7 @@ async function openJournalEdit(encoded) {
   const users = await getUserList();
   const ownerSel = document.getElementById('jedit-owner-select');
   ownerSel.innerHTML = '<option value="">-- 선택 --</option>' +
-    users.map(u => `<option value="${esc(u.username)}">${u.username}</option>`).join('');
+    users.map(u => `<option value="${escHtml(u.username)}">${escHtml(u.username)}</option>`).join('');
   ownerSel.value = jeditJournal.owner;
 
   // ── 시설 드롭다운 채우기 (선택된 기록자 기준) ──
@@ -3411,7 +3391,7 @@ async function jeditLoadFacilities(username, selectedFac) {
   if (!username) return;
   const facs = await getFacilitiesForUser(username);
   facSel.innerHTML = '<option value="">-- 선택 --</option>' +
-    facs.map(f => `<option value="${esc(f)}">${f}</option>`).join('');
+    facs.map(f => `<option value="${escHtml(f)}">${escHtml(f)}</option>`).join('');
   if (selectedFac) facSel.value = selectedFac;
   // 시설 변경 시 교시 리셋
   facSel.onchange = async () => { await jeditLoadTimes(''); };
@@ -3420,7 +3400,7 @@ async function jeditLoadFacilities(username, selectedFac) {
 async function jeditLoadTimes(selectedTime) {
   const timeSel = document.getElementById('jedit-time-select');
   timeSel.innerHTML = '<option value="">-- 선택 --</option>' +
-    cachedTimes.map(t => `<option value="${esc(t)}">${t}</option>`).join('');
+    cachedTimes.map(t => `<option value="${escHtml(t)}">${escHtml(t)}</option>`).join('');
   if (selectedTime) timeSel.value = selectedTime;
 
   // 교시 변경 → 해당 사용자·시설·교시의 학생 목록을 재로드하여 인원 목록 갱신
@@ -3481,9 +3461,9 @@ function jeditRenderPersonList() {
     const aActive = status === '결석' ? 'active-absent'  : '';
     const lActive = status === '지각' ? 'active-late'    : '';
     const safeKey = esc(key);
-    return `<div class="jedit-person-row ${cls}" id="jedit-row-${safeKey}">
+    return `<div class="jedit-person-row ${cls}" id="jedit-row-${escHtml(key)}">
       <span style="font-size:16px">${icon}</span>
-      <span class="jedit-person-name">${name}</span>
+      <span class="jedit-person-name">${escHtml(name)}</span>
       <button class="jedit-status-btn ${pActive}" onclick="jeditSetStatus('${safeKey}','출석')">출석</button>
       <button class="jedit-status-btn ${aActive}" onclick="jeditSetStatus('${safeKey}','결석')">결석</button>
       <button class="jedit-status-btn ${lActive}" onclick="jeditSetStatus('${safeKey}','지각')">지각</button>
@@ -3567,7 +3547,7 @@ async function jeditSave() {
     if (v) newStatusMap[k] = v; // 빈 status(미체크) 제외
   });
 
-  // 원본 키와 새 키가 다르면 → 기존 레코드 삭제 후 새 레코드 INSERT
+  // 원본 키와 새 키가 다르면 → 새 레코드 저장 성공 후 기존 레코드 삭제
   const keyChanged =
     newOwner !== origOwner || newDate !== origDate ||
     newFacility !== origFacility || newTime !== origTime;
@@ -3621,22 +3601,39 @@ async function jeditSave() {
     }
 
   } else {
-    if (keyChanged) {
-      // 기존 레코드 삭제
-      await sb.from('journals').delete()
-        .eq('owner', origOwner).eq('facility', origFacility)
-        .eq('time', origTime).eq('date', origDate);
-      await sb.from('attendance').delete()
-        .eq('owner', origOwner).eq('facility', origFacility)
-        .eq('time', origTime).eq('date', origDate);
+    // 1) 새 키로 먼저 upsert (키가 같으면 단순 갱신, 다르면 새 레코드 생성/덮어쓰기)
+    //    — 저장이 실패하면 원본은 그대로 남아 데이터가 유실되지 않음
+    const { error: jErr } = await sb.from('journals').upsert(journalPayload, { onConflict: 'facility,time,date,owner' });
+    if (jErr) {
+      console.error('journals upsert', jErr);
+      hideLoader(); toast('❌ 일지 저장 실패 — 다시 시도해주세요', 'error'); return;
+    }
+    const { error: aErr } = await sb.from('attendance').upsert(attendancePayload, { onConflict: 'facility,time,date,owner' });
+    if (aErr) {
+      console.error('attendance upsert', aErr);
+      hideLoader();
+      toast(keyChanged
+        ? '❌ 출석 데이터 저장 실패 — 기존 일지는 삭제되지 않았습니다. 다시 시도해주세요'
+        : '❌ 출석 데이터 저장 실패 — 다시 시도해주세요', 'error');
+      return;
+    }
 
-      // 새 키로 upsert (이미 같은 날짜에 다른 일지가 있을 수도 있음)
-      await sb.from('journals').upsert(journalPayload, { onConflict: 'facility,time,date,owner' });
-      await sb.from('attendance').upsert(attendancePayload, { onConflict: 'facility,time,date,owner' });
-    } else {
-      // 같은 키 → 단순 upsert
-      await sb.from('journals').upsert(journalPayload, { onConflict: 'facility,time,date,owner' });
-      await sb.from('attendance').upsert(attendancePayload, { onConflict: 'facility,time,date,owner' });
+    // 2) 키가 바뀐 경우에만, 두 upsert가 모두 성공한 뒤 기존 레코드 삭제
+    if (keyChanged) {
+      const { error: djErr } = await sb.from('journals').delete()
+        .eq('owner', origOwner).eq('facility', origFacility)
+        .eq('time', origTime).eq('date', origDate);
+      const { error: daErr } = await sb.from('attendance').delete()
+        .eq('owner', origOwner).eq('facility', origFacility)
+        .eq('time', origTime).eq('date', origDate);
+      if (djErr || daErr) {
+        console.error('delete original', djErr, daErr);
+        hideLoader();
+        closeJournalEdit();
+        await renderAdminAttTable();
+        toast('⚠️ 새 일지는 저장되었으나 기존 일지 삭제 실패 — 목록에서 기존 일지를 확인 후 삭제해주세요', 'error');
+        return;
+      }
     }
   }
 
@@ -3667,12 +3664,24 @@ async function jeditDeleteJournal() {
         localSet('demo_journals',   localGet('demo_journals',   []).filter(j => !matchKey(j)));
         localSet('demo_attendance', localGet('demo_attendance', []).filter(a => !matchKey(a)));
       } else {
-        await sb.from('journals').delete()
+        const { error: djErr } = await sb.from('journals').delete()
           .eq('owner', origOwner).eq('facility', origFacility)
           .eq('time', origTime).eq('date', origDate);
-        await sb.from('attendance').delete()
+        if (djErr) {
+          console.error('delete journals', djErr);
+          hideLoader(); toast('❌ 일지 삭제 실패 — 다시 시도해주세요', 'error'); return;
+        }
+        const { error: daErr } = await sb.from('attendance').delete()
           .eq('owner', origOwner).eq('facility', origFacility)
           .eq('time', origTime).eq('date', origDate);
+        if (daErr) {
+          console.error('delete attendance', daErr);
+          hideLoader();
+          closeJournalEdit();
+          await renderAdminAttTable();
+          toast('⚠️ 일지는 삭제되었으나 출석 데이터 삭제 실패 — 다시 시도해주세요', 'error');
+          return;
+        }
       }
       hideLoader();
       closeJournalEdit();
@@ -3713,8 +3722,10 @@ function buildStatusMapFromCounts(present, absent, late) {
 // ══════════════════════════════════════════════════════
 // 일지 미리보기 모달
 // ══════════════════════════════════════════════════════
-async function openJournalPreview(encoded) {
-  const j = JSON.parse(decodeURIComponent(encoded));
+// idx: renderJournalView 렌더 시 채운 journalViewCache의 인덱스
+async function openJournalPreview(idx) {
+  const j = journalViewCache[idx];
+  if (!j) { toast('일지 정보를 찾을 수 없습니다 — 다시 조회해주세요', 'error'); return; }
   const sm = j.status_map || {};
 
   // 기본 정보
@@ -3755,9 +3766,9 @@ async function openJournalPreview(encoded) {
       const icon   = statusIcon[status]  || '❓';
       return `<div class="preview-student-item ${cls}">
         <span style="font-size:16px">${icon}</span>
-        <span style="flex:1;font-weight:700">${name}</span>
-        ${meta ? `<span style="font-size:11px;opacity:.75">${meta}</span>` : ''}
-        <span style="font-size:12px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(0,0,0,.08)">${status}</span>
+        <span style="flex:1;font-weight:700">${escHtml(name)}</span>
+        ${meta ? `<span style="font-size:11px;opacity:.75">${escHtml(meta)}</span>` : ''}
+        <span style="font-size:12px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(0,0,0,.08)">${escHtml(status)}</span>
       </div>`;
     }).join('');
   }
@@ -3803,7 +3814,33 @@ function nowKSTString() {
   // 오프셋 표기: +09:00
   return iso.replace('Z', '+09:00');
 }
-function esc(s) { return String(s).replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+// 이번 달 1일 (KST, YYYY-MM-01)
+function monthStartKST() { return today().slice(0, 8) + '01'; }
+
+// HTML 텍스트/속성 값용 이스케이프 — innerHTML 템플릿에 들어가는 사용자 입력값에 사용
+function escHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// onclick="f('${esc(x)}')" 처럼 HTML 속성 안의 JS 문자열 리터럴용 이스케이프
+// 1) JS 문자열 이스케이프(\ ' 줄바꿈) → 2) HTML 속성 이스케이프(& " < >)
+// <option value="..."> 등 일반 속성 값에는 escHtml을 사용할 것
+function esc(s) {
+  return String(s ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 function loader(msg) {
   const el = document.getElementById('globalLoader');
   el.querySelector('span').textContent = msg || '처리 중...';
@@ -3859,23 +3896,37 @@ async function saveNotice() {
 
   loader('공지 저장 중...');
 
-  // localStorage에 저장 (데모 + Supabase 모드 공통)
-  localSet(NOTICE_KEY, notice);
-
   // Supabase 모드: app_options 테이블에 저장 (type='notice', value=JSON)
   if (!isDemo()) {
+    let failMsg = '';
     try {
       // 기존 공지 삭제 후 신규 저장
-      await sb.from('app_options').delete().eq('type', 'system_notice');
-      await sbInsert('app_options', {
-        type: 'system_notice',
-        value: JSON.stringify(notice),
-        owner: null,
-      });
+      const { error: delErr } = await sb.from('app_options').delete().eq('type', 'system_notice');
+      if (delErr) {
+        console.error('Supabase 공지 삭제 오류:', delErr);
+        failMsg = '❌ 공지 저장 실패 (기존 공지 삭제 오류) — 다시 시도해주세요';
+      } else {
+        const res = await sbInsert('app_options', {
+          type: 'system_notice',
+          value: JSON.stringify(notice),
+          owner: null,
+        });
+        if (!res) failMsg = '❌ 공지 저장 실패 — 다시 시도해주세요';
+      }
     } catch(e) {
       console.warn('Supabase 공지 저장 오류:', e);
+      failMsg = '❌ 공지 저장 실패 — 다시 시도해주세요';
+    }
+    if (failMsg) {
+      hideLoader();
+      statusEl.textContent = failMsg;
+      toast(failMsg, 'error');
+      return;
     }
   }
+
+  // localStorage에 저장 (데모 + Supabase 모드 공통) — 서버 저장 성공 후
+  localSet(NOTICE_KEY, notice);
 
   hideLoader();
   statusEl.textContent = `✅ 공지가 발행되었습니다 (${nowKSTString().slice(0,16)}) — 사용자 다음 접속 시 표시`;
@@ -3885,10 +3936,17 @@ async function saveNotice() {
 // 공지 삭제
 async function clearNotice() {
   showConfirm('공지 삭제', '현재 공지사항을 삭제하시겠습니까?', async () => {
-    localStorage.removeItem(NOTICE_KEY);
     if (!isDemo()) {
-      await sb.from('app_options').delete().eq('type', 'system_notice');
+      loader('공지 삭제 중...');
+      const { error } = await sb.from('app_options').delete().eq('type', 'system_notice');
+      hideLoader();
+      if (error) {
+        console.error('Supabase 공지 삭제 오류:', error);
+        toast('❌ 공지 삭제 실패 — 다시 시도해주세요', 'error');
+        return;
+      }
     }
+    localStorage.removeItem(NOTICE_KEY);
     document.getElementById('notice-status').textContent = '공지가 삭제되었습니다.';
     toast('공지가 삭제되었습니다');
   });
